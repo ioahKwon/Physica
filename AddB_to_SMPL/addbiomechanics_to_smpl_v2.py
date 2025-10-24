@@ -90,6 +90,19 @@ SMPL_JOINT_NAMES = [
     'left_hand', 'right_hand'
 ]
 
+# Lower body joint indices (for No_Arm datasets)
+LOWER_BODY_JOINTS = [
+    0,  # pelvis
+    1,  # left_hip
+    2,  # right_hip
+    4,  # left_knee
+    5,  # right_knee
+    7,  # left_ankle
+    8,  # right_ankle
+    10, # left_foot
+    11  # right_foot
+]
+
 
 def load_b3d_sequence(b3d_path: str,
                       trial: int = 0,
@@ -269,22 +282,21 @@ def center_on_root_numpy(pred: np.ndarray,
 
 @dataclass
 class OptimisationConfig:
+    # FIXED11: Reduced iterations for speed ("Less is More")
     shape_lr: float = 5e-3
-    shape_iters: int = 150
+    shape_iters: int = 50  # Reduced from 150
     shape_sample_frames: int = 80
 
     pose_lr: float = 1e-2
-    pose_iters: int = 80
+    pose_iters: int = 15  # Reduced from 80 (same as Stage 1)
 
     tolerance_mm: float = 20.0
-    max_passes: int = 3
+    max_passes: int = 1  # Reduced from 3 - one good pass is enough
 
     pose_reg_weight: float = 1e-3
     trans_reg_weight: float = 1e-3
-    bone_length_weight: float = 10.0  # Weight for bone length constraint
-    temporal_smooth_weight: float = 0.1  # Weight for temporal smoothness
-    ankle_weight: float = 3.0  # Extra weight for ankle joints (problematic)
-    spine_weight: float = 2.0  # Extra weight for spine joints
+    bone_length_weight: float = 100.0  # Weight for bone length constraint (FIXED9)
+    temporal_smooth_weight: float = 0.1  # Keep disabled for FIXED11 (back to original)
 
 
 class AddBToSMPLFitter:
@@ -316,6 +328,9 @@ class AddBToSMPLFitter:
                 self.root_addb_idx = addb_idx
                 break
 
+        # Create joint name to index mapping (for future use)
+        self.addb_name_to_idx = {name: idx for idx, name in enumerate(addb_joint_names)}
+
     # --------------------------- Shape optimisation -----------------------
     def _compute_bone_lengths(self, joints: torch.Tensor) -> Dict[str, float]:
         """Compute bone lengths from joint positions."""
@@ -338,7 +353,87 @@ class AddBToSMPLFitter:
                 lengths[name] = torch.norm(bone_vec)
         return lengths
 
-    def optimise_shape(self) -> torch.Tensor:
+    def optimise_initial_poses(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Stage 1: Initial coarse pose estimation for shape optimization
+        Uses default shape (betas=0) and quickly estimates poses
+        Returns: (poses, trans) - initial estimates
+        """
+        print('  [Stage 1] Initial pose estimation (coarse)...')
+
+        # Default shape
+        betas = torch.zeros(SMPL_NUM_BETAS, device=self.device)
+
+        T = self.target_joints.shape[0]
+        poses = torch.zeros(T, SMPL_NUM_JOINTS, 3, device=self.device)
+        trans = torch.zeros(T, 3, device=self.device)
+
+        # Quick optimization: fewer iterations for speed
+        num_iters = 15  # Much faster than full pose optimization
+        lr = self.config.pose_lr
+
+        for t in range(T):
+            target_frame = self.target_joints[t]
+            if torch.isnan(target_frame).all():
+                continue
+
+            # Initialize translation with target pelvis position (better starting point)
+            target_pelvis_idx = 0  # ground_pelvis in AddBiomechanics
+            addb_indices_list = self.addb_indices.cpu().tolist()
+            if target_pelvis_idx in addb_indices_list:
+                addb_pelvis_pos = addb_indices_list.index(target_pelvis_idx)
+                target_pelvis = target_frame[addb_pelvis_pos]
+                if not torch.isnan(target_pelvis).any():
+                    trans[t] = target_pelvis.clone()
+
+            # Optimize pose and translation for this frame
+            pose_param = torch.nn.Parameter(poses[t].clone())
+            trans_param = torch.nn.Parameter(trans[t].clone())
+            optimiser = torch.optim.Adam([pose_param, trans_param], lr=lr)
+
+            for _ in range(num_iters):
+                optimiser.zero_grad()
+
+                joints_pred = self.smpl.joints(betas.unsqueeze(0), pose_param.unsqueeze(0), trans_param.unsqueeze(0)).squeeze(0)
+
+                # Use absolute positions (no root centering)
+                target_subset = target_frame[self.addb_indices]
+                pred_subset = joints_pred[self.smpl_indices]
+                mask = ~torch.isnan(target_subset).any(dim=1)
+                if mask.sum() == 0:
+                    break
+
+                diff = pred_subset[mask] - target_subset[mask]
+                loss = (diff ** 2).mean()
+
+                # Simple pose regularization
+                loss = loss + 0.01 * (pose_param ** 2).mean()
+
+                loss.backward()
+                optimiser.step()
+
+            # Update pose and translation
+            poses[t] = pose_param.detach()
+            trans[t] = trans_param.detach()
+
+        print(f'    Initial poses estimated for {T} frames')
+        return poses, trans
+
+    def optimise_shape(self, initial_poses: Optional[torch.Tensor] = None,
+                       initial_trans: Optional[torch.Tensor] = None,
+                       batch_size: int = 32) -> torch.Tensor:
+        """
+        Stage 2: Pose-aware shape optimization with mini-batch SGD
+        If initial_poses and initial_trans are provided, use them for optimization.
+        Otherwise, fall back to zero pose (T-pose).
+
+        Args:
+            initial_poses: Initial pose estimates from Stage 1 [T, 24, 3]
+            initial_trans: Initial translation estimates from Stage 1 [T, 3]
+            batch_size: Number of frames to process per mini-batch (default: 32)
+        """
+        print('  [Stage 2] Pose-aware shape optimization (mini-batch SGD)...')
+
         betas = torch.zeros(SMPL_NUM_BETAS, device=self.device, requires_grad=True)
         optimizer = torch.optim.Adam([betas], lr=self.config.shape_lr)
 
@@ -346,15 +441,29 @@ class AddBToSMPLFitter:
         sample_count = min(self.config.shape_sample_frames, num_frames)
         frame_indices = np.linspace(0, num_frames - 1, sample_count, dtype=int)
 
+        print(f'    Total frames: {num_frames}, Sampled: {sample_count}, Batch size: {batch_size}')
+
         # Compute target bone lengths from AddB data (average across frames)
+        # Use mapped SMPL joints from target AddB data
         target_bone_lengths = {}
         valid_count = {}
         for idx in frame_indices:
             target = self.target_joints[idx]
-            if not torch.isnan(target).all():
-                target_c = target - target[self.root_addb_idx] if self.root_addb_idx is not None else target
-                lengths = self._compute_bone_lengths(target_c)
-                for name, length in lengths.items():
+            if torch.isnan(target).all():
+                continue
+
+            # Map AddB joints to SMPL joint positions
+            # Create a pseudo-SMPL skeleton with only mapped joints
+            smpl_like_joints = torch.zeros(24, 3, device=self.device)
+            for addb_key, smpl_idx in self.joint_mapping.items():
+                addb_idx_int = int(addb_key)
+                if addb_idx_int < target.shape[0]:
+                    smpl_like_joints[smpl_idx] = target[addb_idx_int]
+
+            # Compute bone lengths using SMPL indices (but from AddB data)
+            lengths = self._compute_bone_lengths(smpl_like_joints)
+            for name, length in lengths.items():
+                if not torch.isnan(length) and length > 0:
                     if name not in target_bone_lengths:
                         target_bone_lengths[name] = 0.0
                         valid_count[name] = 0
@@ -366,55 +475,129 @@ class AddBToSMPLFitter:
             if valid_count[name] > 0:
                 target_bone_lengths[name] /= valid_count[name]
 
-        zero_pose = torch.zeros(1, SMPL_NUM_JOINTS, 3, device=self.device)
-        zero_trans = torch.zeros(1, 3, device=self.device)
+        print(f'    Target bone lengths computed: {list(target_bone_lengths.keys())}')
+
+        # Use initial poses if provided (Stage 2: pose-aware), otherwise use zero pose (fallback)
+        use_pose_aware = initial_poses is not None and initial_trans is not None
+        if not use_pose_aware:
+            print('    Warning: No initial poses provided, falling back to zero pose (T-pose)')
+            zero_pose = torch.zeros(1, SMPL_NUM_JOINTS, 3, device=self.device)
+            zero_trans = torch.zeros(1, 3, device=self.device)
+        else:
+            print(f'    Using pose-aware optimization with {len(frame_indices)} sampled frames')
+
+        # Mini-batch SGD loop
+        num_batches = int(np.ceil(len(frame_indices) / batch_size))
+        print(f'    Running {self.config.shape_iters} iterations with {num_batches} batches per iteration')
 
         for it in range(self.config.shape_iters):
-            optimizer.zero_grad()
+            # Shuffle frame indices for SGD
+            np.random.shuffle(frame_indices)
 
-            joints_pred = self.smpl.joints(betas.unsqueeze(0), zero_pose[0], zero_trans[0]).squeeze(0)
+            epoch_loss = 0.0
+            epoch_batches = 0
 
-            # Joint position loss
-            total_loss = 0.0
-            valid_frames = 0
-            for idx in frame_indices:
-                target = self.target_joints[idx]
-                if torch.isnan(target).all():
-                    continue
-                pred_c, target_c = center_on_root_tensor(joints_pred, target, self.root_addb_idx)
+            # Process mini-batches
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min((batch_idx + 1) * batch_size, len(frame_indices))
+                batch_frame_indices = frame_indices[start_idx:end_idx]
 
-                target_subset = target_c[self.addb_indices]
-                pred_subset = pred_c[self.smpl_indices]
+                optimizer.zero_grad()
 
-                mask = ~torch.isnan(target_subset).any(dim=1)
-                if mask.sum() == 0:
-                    continue
+                # Joint position loss (use absolute positions, no root centering)
+                if use_pose_aware:
+                    total_loss = 0.0
+                    valid_frames = 0
 
-                diff = pred_subset[mask] - target_subset[mask]
-                total_loss = total_loss + (diff ** 2).mean()
-                valid_frames += 1
+                    # For each frame in the mini-batch, use its actual pose
+                    for idx in batch_frame_indices:
+                        target = self.target_joints[idx]
+                        if torch.isnan(target).all():
+                            continue
 
-            if valid_frames == 0:
-                break
+                        # Use actual pose from Stage 1
+                        pose_t = initial_poses[idx]
+                        trans_t = initial_trans[idx]
 
-            loss = total_loss / valid_frames
+                        joints_pred = self.smpl.joints(betas.unsqueeze(0), pose_t.unsqueeze(0), trans_t.unsqueeze(0)).squeeze(0)
 
-            # Bone length constraint loss
-            pred_bone_lengths = self._compute_bone_lengths(joints_pred)
-            bone_loss = 0.0
-            bone_count = 0
-            for name, target_len in target_bone_lengths.items():
-                if name in pred_bone_lengths:
-                    diff_len = pred_bone_lengths[name] - target_len
-                    bone_loss += diff_len ** 2
-                    bone_count += 1
+                        # Use absolute positions to match correct scale/size
+                        target_subset = target[self.addb_indices]
+                        pred_subset = joints_pred[self.smpl_indices]
 
-            if bone_count > 0:
-                bone_loss = bone_loss / bone_count
-                loss = loss + self.config.bone_length_weight * bone_loss
+                        mask = ~torch.isnan(target_subset).any(dim=1)
+                        if mask.sum() == 0:
+                            continue
 
-            loss.backward()
-            optimizer.step()
+                        diff = pred_subset[mask] - target_subset[mask]
+                        total_loss = total_loss + (diff ** 2).mean()
+                        valid_frames += 1
+
+                    if valid_frames == 0:
+                        continue
+
+                    loss = total_loss / valid_frames
+
+                    # For bone length computation, use first frame in batch
+                    first_batch_idx = batch_frame_indices[0]
+                    joints_pred_for_bones = self.smpl.joints(betas.unsqueeze(0), initial_poses[first_batch_idx].unsqueeze(0), initial_trans[first_batch_idx].unsqueeze(0)).squeeze(0)
+                else:
+                    # Original zero-pose approach (fallback)
+                    joints_pred = self.smpl.joints(betas.unsqueeze(0), zero_pose[0], zero_trans[0]).squeeze(0)
+
+                    # Joint position loss (use absolute positions, no root centering)
+                    total_loss = 0.0
+                    valid_frames = 0
+                    for idx in batch_frame_indices:
+                        target = self.target_joints[idx]
+                        if torch.isnan(target).all():
+                            continue
+
+                        # Use absolute positions to match correct scale/size
+                        target_subset = target[self.addb_indices]
+                        pred_subset = joints_pred[self.smpl_indices]
+
+                        mask = ~torch.isnan(target_subset).any(dim=1)
+                        if mask.sum() == 0:
+                            continue
+
+                        diff = pred_subset[mask] - target_subset[mask]
+                        total_loss = total_loss + (diff ** 2).mean()
+                        valid_frames += 1
+
+                    if valid_frames == 0:
+                        continue
+
+                    loss = total_loss / valid_frames
+                    joints_pred_for_bones = joints_pred
+
+                # Bone length constraint loss (use joints_pred_for_bones)
+                pred_bone_lengths = self._compute_bone_lengths(joints_pred_for_bones)
+                bone_loss = 0.0
+                bone_count = 0
+                for name, target_len in target_bone_lengths.items():
+                    if name in pred_bone_lengths:
+                        diff_len = pred_bone_lengths[name] - target_len
+                        bone_loss += diff_len ** 2
+                        bone_count += 1
+
+                if bone_count > 0:
+                    bone_loss = bone_loss / bone_count
+                    loss = loss + self.config.bone_length_weight * bone_loss
+
+                # Backward pass for this mini-batch
+                loss.backward()
+                optimizer.step()
+
+                # Track epoch loss
+                epoch_loss += loss.item()
+                epoch_batches += 1
+
+            # Print epoch loss every 10 iterations
+            if (it + 1) % 10 == 0 and epoch_batches > 0:
+                avg_epoch_loss = epoch_loss / epoch_batches
+                print(f'    Iteration {it + 1}/{self.config.shape_iters}: Avg batch loss = {avg_epoch_loss:.6f}')
 
         return betas.detach()
 
@@ -444,33 +627,27 @@ class AddBToSMPLFitter:
             if torch.isnan(target_frame).all():
                 continue
 
+            # Optimize pose and translation parameters for this frame
             pose_param = torch.nn.Parameter(poses[t].clone())
             trans_param = torch.nn.Parameter(trans[t].clone())
             optimiser = torch.optim.Adam([pose_param, trans_param], lr=lr)
 
             for _ in range(num_iters):
                 optimiser.zero_grad()
-                joints_pred = self.smpl.joints(betas.unsqueeze(0), pose_param.unsqueeze(0), trans_param.unsqueeze(0)).squeeze(0)
-                pred_c, target_c = center_on_root_tensor(joints_pred, target_frame, self.root_addb_idx)
 
-                target_subset = target_c[self.addb_indices]
-                pred_subset = pred_c[self.smpl_indices]
+                joints_pred = self.smpl.joints(betas.unsqueeze(0), pose_param.unsqueeze(0), trans_param.unsqueeze(0)).squeeze(0)
+
+                # Use absolute positions (no root centering) to properly learn translation
+                target_subset = target_frame[self.addb_indices]
+                pred_subset = joints_pred[self.smpl_indices]
                 mask = ~torch.isnan(target_subset).any(dim=1)
                 if mask.sum() == 0:
                     break
 
                 diff = pred_subset[mask] - target_subset[mask]
 
-                # Per-joint weighting for problematic joints
-                weights = torch.ones(diff.shape[0], device=self.device)
-                for i, smpl_idx in enumerate(self.smpl_indices[mask]):
-                    if smpl_idx in [7, 8]:  # ankles
-                        weights[i] = self.config.ankle_weight
-                    elif smpl_idx in [3, 6, 9]:  # spine joints
-                        weights[i] = self.config.spine_weight
-
-                weighted_diff = diff * weights.unsqueeze(-1)
-                loss = (weighted_diff ** 2).mean()
+                # Simple uniform weighting (FIXED9/FIXED11)
+                loss = (diff ** 2).mean()
 
                 # Pose regularization
                 loss = loss + self.config.pose_reg_weight * (pose_param ** 2).mean()
@@ -481,7 +658,7 @@ class AddBToSMPLFitter:
                     if not torch.isnan(root_target).any():
                         loss = loss + self.config.trans_reg_weight * ((trans_param - root_target) ** 2).mean()
 
-                # Temporal smoothness (disabled - original optimization works best)
+                # Temporal smoothness (disabled for FIXED9/FIXED11 - keep it simple)
                 # if self.config.temporal_smooth_weight > 0 and t > 0:
                 #     pose_diff = pose_param - poses[t-1]
                 #     trans_diff = trans_param - trans[t-1]
@@ -491,6 +668,7 @@ class AddBToSMPLFitter:
                 loss.backward()
                 optimiser.step()
 
+            # Update pose and translation
             poses[t] = pose_param.detach()
             trans[t] = trans_param.detach()
 
@@ -516,14 +694,14 @@ class AddBToSMPLFitter:
         pck_counts = np.zeros(len(thresholds), dtype=np.int64)
 
         for pred_frame, target_frame in zip(joints_pred, self.target_joints_np):
-            pred_c, target_c = center_on_root_numpy(pred_frame, target_frame, self.root_addb_idx)
+            # Compute error WITHOUT root centering (to match visualization)
             for addb_idx, smpl_idx in self.joint_mapping.items():
-                if addb_idx >= target_c.shape[0]:
+                if addb_idx >= target_frame.shape[0]:
                     continue
-                tgt = target_c[addb_idx]
+                tgt = target_frame[addb_idx]
                 if np.any(np.isnan(tgt)):
                     continue
-                diff = pred_c[smpl_idx] - tgt
+                diff = pred_frame[smpl_idx] - tgt
                 error_m = np.linalg.norm(diff)
                 errors.append(error_m * 1000.0)  # Convert to millimeters
                 for i, thr in enumerate(thresholds):
@@ -542,19 +720,53 @@ class AddBToSMPLFitter:
 
     # --------------------------- Full fitting pipeline ---------------------
     def run(self) -> Tuple[torch.Tensor, np.ndarray, np.ndarray, Dict[str, float], np.ndarray]:
-        betas = self.optimise_shape()
+        """
+        Three-stage pose-aware optimization workflow:
+        Stage 1: Initial coarse pose estimation (with default shape)
+        Stage 2: Pose-aware shape optimization (using Stage 1 poses)
+        Stage 3: Pose refinement (with optimized shape from Stage 2)
+        """
+        print("\n" + "="*80)
+        print("STARTING THREE-STAGE POSE-AWARE OPTIMIZATION")
+        print("="*80)
 
-        poses_np, trans_np = self.optimise_pose_sequence(betas)
+        # Stage 1: Initial pose estimation with default shape
+        print("\n--- STAGE 1: Initial Pose Estimation ---")
+        initial_poses, initial_trans = self.optimise_initial_poses()
+
+        # Quick evaluation of Stage 1 results
+        betas_zero = torch.zeros(SMPL_NUM_BETAS, device=self.device)
+        poses_np_stage1 = initial_poses.cpu().numpy()
+        trans_np_stage1 = initial_trans.cpu().numpy()
+        metrics_stage1, _ = self.evaluate(betas_zero, poses_np_stage1, trans_np_stage1)
+        print(f"  Stage 1 MPJPE (default shape): {metrics_stage1['MPJPE']:.2f} mm")
+
+        # Stage 2: Pose-aware shape optimization
+        print("\n--- STAGE 2: Pose-Aware Shape Optimization ---")
+        betas = self.optimise_shape(initial_poses=initial_poses, initial_trans=initial_trans)
+        print(f"  Optimized shape parameters (betas): {betas.cpu().numpy()[:5]}")  # Show first 5
+
+        # Stage 3: Pose refinement with optimized shape
+        print("\n--- STAGE 3: Pose Refinement with Optimized Shape ---")
+        poses_np, trans_np = self.optimise_pose_sequence(
+            betas,
+            init_poses=initial_poses,
+            init_trans=initial_trans
+        )
         metrics, pred_joints = self.evaluate(betas, poses_np, trans_np)
+        print(f"  Stage 3 MPJPE (optimized shape + refined poses): {metrics['MPJPE']:.2f} mm")
 
+        # Additional refinement passes if needed
         tolerance = self.config.tolerance_mm / 1000.0
         passes = 1
 
+        print("\n--- Additional Refinement Passes (if needed) ---")
         while (
             passes < self.config.max_passes
             and not np.isnan(metrics['MPJPE'])
             and metrics['MPJPE'] > tolerance
         ):
+            print(f"  Refinement pass {passes}: Current MPJPE = {metrics['MPJPE']:.2f} mm")
             poses_init = torch.from_numpy(poses_np).float().to(self.device)
             trans_init = torch.from_numpy(trans_np).float().to(self.device)
             poses_np, trans_np = self.optimise_pose_sequence(
@@ -565,7 +777,14 @@ class AddBToSMPLFitter:
                 pose_lr=self.config.pose_lr * 0.5
             )
             metrics, pred_joints = self.evaluate(betas, poses_np, trans_np)
+            print(f"  After pass {passes}: MPJPE = {metrics['MPJPE']:.2f} mm")
             passes += 1
+
+        print("\n" + "="*80)
+        print("OPTIMIZATION COMPLETE")
+        print(f"Final MPJPE: {metrics['MPJPE']:.2f} mm")
+        print(f"Total refinement passes: {passes}")
+        print("="*80 + "\n")
 
         return betas, poses_np, trans_np, metrics, pred_joints
 
@@ -619,6 +838,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--pose_reg', type=float, default=1e-3)
     parser.add_argument('--trans_reg', type=float, default=1e-3)
 
+    parser.add_argument('--lower_body_only', action='store_true',
+                        help='Fit only lower body joints (for No_Arm datasets)')
     parser.add_argument('--verbose', action='store_true')
     return parser.parse_args()
 
@@ -664,6 +885,13 @@ def main() -> None:
     auto_map = auto_map_addb_to_smpl(joint_names)
     overrides = load_mapping_overrides(args.map_json, joint_names)
     mapping = resolve_mapping(joint_names, auto_map, overrides)
+
+    # Filter mapping to lower body only if requested
+    if args.lower_body_only:
+        original_count = len(mapping)
+        mapping = {addb_idx: smpl_idx for addb_idx, smpl_idx in mapping.items()
+                   if smpl_idx in LOWER_BODY_JOINTS}
+        print(f'  Lower body filtering: {original_count} → {len(mapping)} joints')
 
     print(f'  Using {len(mapping)} correspondences')
     for idx, smpl_idx in sorted(mapping.items(), key=lambda kv: kv[0]):
