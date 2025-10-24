@@ -13,26 +13,23 @@ from addbiomechanics_to_smpl_v2 import (
     SMPLModel, load_b3d_sequence, infer_addb_joint_names,
     convert_addb_to_smpl_coords, auto_map_addb_to_smpl,
     load_mapping_overrides, resolve_mapping, SMPL_JOINT_NAMES,
-    center_on_root_tensor, derive_run_name
+    derive_run_name, LOWER_BODY_JOINTS
 )
 
 SMPL_NUM_JOINTS = 24
 
 def compute_mpjpe(pred_joints, target_joints, mapping):
-    """Compute MPJPE between predicted and target joints"""
+    """Compute MPJPE between predicted and target joints (absolute positions)"""
     errors = []
     for addb_idx, smpl_idx in mapping.items():
         pred = pred_joints[:, smpl_idx, :]
         target = target_joints[:, addb_idx, :]
-        
-        # Center on root
-        pred_centered, target_centered = center_on_root_tensor(pred, target, 0)
-        
-        # Compute error
-        diff = pred_centered - target_centered
+
+        # Compute error WITHOUT root centering (to match visualization)
+        diff = pred - target
         error = torch.sqrt(torch.sum(diff ** 2, dim=1))
         errors.append(error)
-    
+
     all_errors = torch.cat(errors)
     mpjpe = torch.mean(all_errors) * 1000  # Convert to mm
     return mpjpe.item()
@@ -83,12 +80,8 @@ def refine_with_per_joint_offsets(smpl, betas, poses, trans, target_joints, mapp
             for addb_idx, smpl_idx in mapping.items():
                 target_joint = target_tensor[t, addb_idx]
                 if not torch.isnan(target_joint).any():
-                    pred_centered, target_centered = center_on_root_tensor(
-                        joints_pred_with_offset[smpl_idx],
-                        target_joint,
-                        None
-                    )
-                    diff = pred_centered - target_centered
+                    # Compute error WITHOUT root centering (to match corrected MPJPE)
+                    diff = joints_pred_with_offset[smpl_idx] - target_joint
                     frame_loss += torch.sum(diff ** 2)
             
             total_loss += frame_loss
@@ -140,7 +133,9 @@ def main():
     parser.add_argument('--offset_lr', type=float, default=0.01)
     parser.add_argument('--offset_iters', type=int, default=50)
     parser.add_argument('--offset_reg_weight', type=float, default=1e-4)
-    
+    parser.add_argument('--lower_body_only', action='store_true',
+                        help='Fit only lower body joints (for No_Arm datasets)')
+
     args = parser.parse_args()
     
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -174,7 +169,14 @@ def main():
     auto_map = auto_map_addb_to_smpl(joint_names)
     overrides = load_mapping_overrides(args.map_json, joint_names)
     mapping = resolve_mapping(joint_names, auto_map, overrides)
-    
+
+    # Filter mapping to lower body only if requested
+    if args.lower_body_only:
+        original_count = len(mapping)
+        mapping = {addb_idx: smpl_idx for addb_idx, smpl_idx in mapping.items()
+                   if smpl_idx in LOWER_BODY_JOINTS}
+        print(f"Lower body filtering: {original_count} → {len(mapping)} joints")
+
     # Load SMPL model
     print("\nInitializing SMPL model...")
     smpl = SMPLModel(args.smpl_model, device=device)
