@@ -21,14 +21,27 @@ ENV/
 
 # Results
 results/
+results_*/
 outputs/
 *.pkl
 *.pth
 *.pt
+*.log
+*.mp4
+*.png
+*.avi
 
 # Data
 dataset/
 data/
+
+# Models (large files)
+models/*.pkl
+models/*.pt
+models/*.pth
+
+# Visualization directories
+visualizations_*/
 
 # OS
 .DS_Store
