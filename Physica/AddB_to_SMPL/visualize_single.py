@@ -10,15 +10,15 @@ from pathlib import Path
 # Lower body joint indices (SMPL)
 LOWER_BODY_JOINTS = [0, 1, 2, 4, 5, 7, 8, 10, 11]  # pelvis, hips, knees, ankles, feet
 
-# Lower body skeleton connections (CORRECTED for filtered indices)
-# After filtering: [0, 1, 2, 4, 5, 7, 8, 10, 11] becomes [0, 1, 2, 3, 4, 5, 6, 7, 8]
-# Mapping: pelvis(0), left_hip(1), right_hip(2), left_knee(3), right_knee(4),
-#          left_ankle(5), right_ankle(6), left_foot(7), right_foot(8)
+# Lower body skeleton connections
+# SMPL indices: [0, 1, 2, 4, 5, 7, 8, 10, 11]
+# Mapped to:    [0, 1, 2, 3, 4, 5, 6, 7,  8 ]
+# Names:  pelvis, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle, left_foot, right_foot
 LOWER_BODY_SKELETON = [
-    (0, 1), (0, 2),  # pelvis to hips
-    (1, 3), (2, 4),  # hips to knees
-    (3, 5), (4, 6),  # knees to ankles
-    (5, 7), (6, 8)   # ankles to feet
+    (0, 1), (0, 2),  # pelvis → hips
+    (1, 3), (2, 4),  # hips → knees
+    (3, 5), (4, 6),  # knees → ankles
+    (5, 7), (6, 8)   # ankles → feet
 ]
 
 def visualize_skeleton_video(pred_joints_path, target_joints_path, output_path,
