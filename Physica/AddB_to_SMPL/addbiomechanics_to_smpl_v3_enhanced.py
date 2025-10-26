@@ -298,16 +298,16 @@ def center_on_root_numpy(pred: np.ndarray,
 
 @dataclass
 class OptimisationConfig:
-    # FIXED11: Reduced iterations for speed ("Less is More")
+    # Default values match parse_args defaults for consistency
     shape_lr: float = 5e-3
-    shape_iters: int = 50  # Reduced from 150
+    shape_iters: int = 150  # Match parse_args default
     shape_sample_frames: int = 80
 
     pose_lr: float = 1e-2
-    pose_iters: int = 15  # Reduced from 80 (same as Stage 1)
+    pose_iters: int = 80  # Match parse_args default
 
     tolerance_mm: float = 20.0
-    max_passes: int = 1  # Reduced from 3 - one good pass is enough
+    max_passes: int = 3  # Match parse_args default
 
     pose_reg_weight: float = 1e-3
     trans_reg_weight: float = 1e-3
@@ -1306,7 +1306,191 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def process_single_b3d(
+    b3d_path: str,
+    smpl_model: SMPLModel,
+    out_dir: str,
+    num_frames: int = 64,
+    device: torch.device = None,
+    trial: int = 0,
+    processing_pass: int = 0,
+    start: int = 0,
+    map_json: Optional[str] = None,
+    lower_body_only: bool = True,
+    config: OptimisationConfig = None,
+    verbose: bool = True
+) -> Dict:
+    """
+    Process a single .b3d file and fit SMPL parameters.
+
+    This is a refactored version of main() that can be called programmatically
+    without parsing command-line arguments, enabling true minibatch processing.
+
+    Args:
+        b3d_path: Path to .b3d file
+        smpl_model: Pre-loaded SMPL model instance (reused across batches)
+        out_dir: Output directory for this subject
+        num_frames: Number of frames to process
+        device: torch device (cpu or cuda)
+        trial: Trial index
+        processing_pass: Processing pass name
+        start: Start frame
+        map_json: Path to joint mapping override JSON
+        lower_body_only: Whether to use only lower body joints
+        config: Optimization configuration (uses defaults if None)
+        verbose: Whether to print progress messages
+
+    Returns:
+        Dict containing metrics: MPJPE, processing time, etc.
+    """
+    if device is None:
+        device = torch.device('cpu')
+
+    if config is None:
+        config = OptimisationConfig()
+
+    os.makedirs(out_dir, exist_ok=True)
+    run_name = os.path.basename(out_dir)
+
+    if verbose:
+        print('\n' + '=' * 80)
+        print('AddBiomechanics → SMPL Fitter')
+        print('=' * 80)
+        print(f'Run name : {run_name}')
+        print(f'Output   : {out_dir}')
+        print(f'Device   : {device}')
+        print('=' * 80 + '\n')
+
+    # [1/5] Load AddBiomechanics data
+    if verbose:
+        print('[1/5] Loading AddBiomechanics data...')
+    addb_joints, dt = load_b3d_sequence(
+        b3d_path,
+        trial=trial,
+        processing_pass=processing_pass,
+        start=start,
+        num_frames=num_frames
+    )
+    joint_names = infer_addb_joint_names(
+        b3d_path,
+        trial=trial,
+        processing_pass=processing_pass
+    )
+    addb_joints = convert_addb_to_smpl_coords(addb_joints)
+    if verbose:
+        print(f'  Frames : {addb_joints.shape[0]}')
+        print(f'  Joints : {addb_joints.shape[1]}')
+        print(f'  dt     : {dt:.6f} s ({1.0 / dt:.2f} fps)')
+
+    # [2/5] Resolve joint correspondences
+    if verbose:
+        print('\n[2/5] Resolving joint correspondences...')
+    auto_map = auto_map_addb_to_smpl(joint_names)
+    overrides = load_mapping_overrides(map_json, joint_names)
+    mapping = resolve_mapping(joint_names, auto_map, overrides)
+
+    # Filter mapping to lower body only if requested
+    if lower_body_only:
+        original_count = len(mapping)
+        mapping = {addb_idx: smpl_idx for addb_idx, smpl_idx in mapping.items()
+                   if smpl_idx in LOWER_BODY_JOINTS}
+        if verbose:
+            print(f'  Lower body filtering: {original_count} → {len(mapping)} joints')
+
+    if verbose:
+        print(f'  Using {len(mapping)} correspondences')
+        for idx, smpl_idx in sorted(mapping.items(), key=lambda kv: kv[0]):
+            addb_name = joint_names[idx] if idx < len(joint_names) else str(idx)
+            smpl_name = SMPL_JOINT_NAMES[smpl_idx]
+            print(f'    {addb_name:20s} → {smpl_name}')
+
+    unmapped = [name for i, name in enumerate(joint_names) if i not in mapping]
+    if unmapped and verbose:
+        print(f'  Unmapped AddB joints ({len(unmapped)}): {", ".join(unmapped)}')
+
+    # [3/5] Initialize fitter (SMPL model already loaded)
+    if verbose:
+        print('\n[3/5] Initializing fitter...')
+
+    fitter = AddBToSMPLFitter(
+        smpl_model=smpl_model,
+        target_joints=addb_joints,
+        joint_mapping=mapping,
+        addb_joint_names=joint_names,
+        dt=dt,
+        config=config,
+        device=device
+    )
+
+    # [4/5] Optimize SMPL parameters
+    if verbose:
+        print('\n[4/5] Optimising SMPL parameters...')
+
+    import time
+    opt_start = time.time()
+    betas, poses_np, trans_np, metrics, pred_joints = fitter.run()
+    opt_time = time.time() - opt_start
+
+    # [5/5] Save results
+    if verbose:
+        print('\n[5/5] Metrics:')
+        for key, value in metrics.items():
+            if isinstance(value, float):
+                print(f'  {key}: {value:.6f}')
+            else:
+                print(f'  {key}: {value}')
+
+    if verbose:
+        print('\nSaving results...')
+
+    np.savez(
+        os.path.join(out_dir, 'smpl_params.npz'),
+        betas=betas.cpu().numpy(),
+        poses=poses_np,
+        trans=trans_np
+    )
+    np.save(os.path.join(out_dir, 'pred_joints.npy'), pred_joints)
+    np.save(os.path.join(out_dir, 'target_joints.npy'), addb_joints)
+
+    meta = {
+        'b3d': b3d_path,
+        'run_name': run_name,
+        'dt': float(dt),
+        'num_frames': int(addb_joints.shape[0]),
+        'num_joints_addb': int(addb_joints.shape[1]),
+        'addb_joint_names': joint_names,
+        'joint_mapping': mapping,
+        'joint_mapping_named': {
+            joint_names[idx]: SMPL_JOINT_NAMES[smpl_idx]
+            for idx, smpl_idx in mapping.items()
+        },
+        'metrics': metrics,
+        'unmapped_addb_joints': unmapped,
+        'optimization_time_seconds': opt_time,
+    }
+
+    # Add MPJPE to meta for easy access
+    if 'MPJPE' in metrics:
+        meta['MPJPE'] = metrics['MPJPE']
+
+    with open(os.path.join(out_dir, 'meta.json'), 'w') as f:
+        json.dump(meta, f, indent=2)
+
+    if verbose:
+        print('\n' + '=' * 80)
+        print(f'DONE! Results saved to: {out_dir}')
+        print('=' * 80 + '\n')
+
+    return {
+        'metrics': metrics,
+        'mpjpe': metrics.get('MPJPE', -1),
+        'optimization_time': opt_time,
+        'output_dir': out_dir
+    }
+
+
 def main() -> None:
+    """Main entry point for command-line usage."""
     args = parse_args()
 
     device = torch.device('cuda' if args.device == 'cuda' and torch.cuda.is_available() else 'cpu')
@@ -1315,59 +1499,12 @@ def main() -> None:
 
     run_name = derive_run_name(args.b3d)
     out_dir = os.path.join(args.out_dir, run_name)
-    os.makedirs(out_dir, exist_ok=True)
 
-    print('\n' + '=' * 80)
-    print('AddBiomechanics → SMPL Fitter')
-    print('=' * 80)
-    print(f'Run name : {run_name}')
-    print(f'Output   : {out_dir}')
-    print(f'Device   : {device}')
-    print('=' * 80 + '\n')
-
-    print('[1/5] Loading AddBiomechanics data...')
-    addb_joints, dt = load_b3d_sequence(
-        args.b3d,
-        trial=args.trial,
-        processing_pass=args.processing_pass,
-        start=args.start,
-        num_frames=args.num_frames
-    )
-    joint_names = infer_addb_joint_names(
-        args.b3d,
-        trial=args.trial,
-        processing_pass=args.processing_pass
-    )
-    addb_joints = convert_addb_to_smpl_coords(addb_joints)
-    print(f'  Frames : {addb_joints.shape[0]}')
-    print(f'  Joints : {addb_joints.shape[1]}')
-    print(f'  dt     : {dt:.6f} s ({1.0 / dt:.2f} fps)')
-
-    print('\n[2/5] Resolving joint correspondences...')
-    auto_map = auto_map_addb_to_smpl(joint_names)
-    overrides = load_mapping_overrides(args.map_json, joint_names)
-    mapping = resolve_mapping(joint_names, auto_map, overrides)
-
-    # Filter mapping to lower body only if requested
-    if args.lower_body_only:
-        original_count = len(mapping)
-        mapping = {addb_idx: smpl_idx for addb_idx, smpl_idx in mapping.items()
-                   if smpl_idx in LOWER_BODY_JOINTS}
-        print(f'  Lower body filtering: {original_count} → {len(mapping)} joints')
-
-    print(f'  Using {len(mapping)} correspondences')
-    for idx, smpl_idx in sorted(mapping.items(), key=lambda kv: kv[0]):
-        addb_name = joint_names[idx] if idx < len(joint_names) else str(idx)
-        smpl_name = SMPL_JOINT_NAMES[smpl_idx]
-        print(f'    {addb_name:20s} → {smpl_name}')
-
-    unmapped = [name for i, name in enumerate(joint_names) if i not in mapping]
-    if unmapped:
-        print(f'  Unmapped AddB joints ({len(unmapped)}): {", ".join(unmapped)}')
-
-    print('\n[3/5] Initialising SMPL model...')
+    # Load SMPL model
+    print('\n[Loading SMPL model...]')
     smpl = SMPLModel(args.smpl_model, device=device)
 
+    # Create config from args
     cfg = OptimisationConfig(
         shape_lr=args.shape_lr,
         shape_iters=args.shape_iters,
@@ -1380,65 +1517,23 @@ def main() -> None:
         trans_reg_weight=args.trans_reg
     )
 
-    fitter = AddBToSMPLFitter(
+    # Process using the refactored function
+    result = process_single_b3d(
+        b3d_path=args.b3d,
         smpl_model=smpl,
-        target_joints=addb_joints,
-        joint_mapping=mapping,
-        addb_joint_names=joint_names,
-        dt=dt,
+        out_dir=out_dir,
+        num_frames=args.num_frames,
+        device=device,
+        trial=args.trial,
+        processing_pass=args.processing_pass,
+        start=args.start,
+        map_json=args.map_json,
+        lower_body_only=args.lower_body_only,
         config=cfg,
-        device=device
+        verbose=True
     )
 
-    print('\n[4/5] Optimising SMPL parameters...')
-    betas, poses_np, trans_np, metrics, pred_joints = fitter.run()
-
-    print('\n[5/5] Metrics:')
-    for key, value in metrics.items():
-        if isinstance(value, float):
-            print(f'  {key}: {value:.6f}')
-        else:
-            print(f'  {key}: {value}')
-
-    print('\nSaving results...')
-    np.savez(
-        os.path.join(out_dir, 'smpl_params.npz'),
-        betas=betas.cpu().numpy(),
-        poses=poses_np,
-        trans=trans_np
-    )
-    np.save(os.path.join(out_dir, 'pred_joints.npy'), pred_joints)
-    np.save(os.path.join(out_dir, 'target_joints.npy'), addb_joints)
-
-    meta = {
-        'b3d': args.b3d,
-        'run_name': run_name,
-        'dt': float(dt),
-        'num_frames': int(addb_joints.shape[0]),
-        'num_joints_addb': int(addb_joints.shape[1]),
-        'addb_joint_names': joint_names,
-        'joint_mapping': mapping,
-        'joint_mapping_named': {
-            joint_names[idx]: SMPL_JOINT_NAMES[smpl_idx]
-            for idx, smpl_idx in mapping.items()
-        },
-        'shape_lr': args.shape_lr,
-        'shape_iters': args.shape_iters,
-        'shape_sample_frames': args.shape_sample_frames,
-        'pose_lr': args.pose_lr,
-        'pose_iters': args.pose_iters,
-        'tolerance_mm': args.tolerance_mm,
-        'max_passes': args.max_passes,
-        'metrics': metrics,
-        'unmapped_addb_joints': unmapped,
-    }
-
-    with open(os.path.join(out_dir, 'meta.json'), 'w') as f:
-        json.dump(meta, f, indent=2)
-
-    print('\n' + '=' * 80)
-    print(f'DONE! Results saved to: {out_dir}')
-    print('=' * 80 + '\n')
+    # Done (result dict contains metrics, mpjpe, optimization_time, output_dir)
 
 
 if __name__ == '__main__':
