@@ -1,0 +1,36 @@
+{
+  "no_arm": [
+    {
+      "subject": "Subject29",
+      "frames": 64,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/No_Arm/Tiziana2019_Formatted_No_Arm/Subject29/Subject29.b3d"
+    },
+    {
+      "subject": "s005_split1",
+      "frames": 500,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/No_Arm/Han2023_Formatted_No_Arm/s005_split1/s005_split1.b3d"
+    },
+    {
+      "subject": "subject39",
+      "frames": 2000,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/No_Arm/Santos2017_Formatted_No_Arm/subject39/subject39.b3d"
+    }
+  ],
+  "with_arm": [
+    {
+      "subject": "Subject18",
+      "frames": 63,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Tiziana2019_Formatted_With_Arm/Subject18/Subject18.b3d"
+    },
+    {
+      "subject": "2GC",
+      "frames": 529,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Fregly2012_Formatted_With_Arm/2GC/2GC.b3d"
+    },
+    {
+      "subject": "P044_split0",
+      "frames": 2000,
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Carter2023_Formatted_With_Arm/P044_split0/P044_split0.b3d"
+    }
+  ]
+}
