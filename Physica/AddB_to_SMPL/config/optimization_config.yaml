@@ -1,0 +1,105 @@
+# SMPL Optimization Configuration
+# This file contains all hyperparameters for the AddBiomechanics to SMPL fitting pipeline
+
+# Device configuration
+device: cuda  # Options: 'cuda', 'cpu'
+
+# Shape optimization parameters
+shape:
+  lr: 0.005
+  iters: 100  # Max iterations (with early stopping)
+  sample_frames: 50  # Number of keyframes to use (smart sampling)
+  batch_size: 32  # Mini-batch size for SGD
+
+# Pose optimization parameters
+pose:
+  lr: 0.01
+  iters: 40  # Max iterations per frame (with early stopping)
+  reg_weight: 0.001  # Pose regularization weight
+
+# Translation optimization
+translation:
+  reg_weight: 0.001  # Translation regularization weight
+
+# Sequence refinement parameters
+sequence:
+  iters: 30  # Max iterations for sequence-level refinement
+  temporal_smooth_weight: 0.1  # Temporal smoothness weight
+
+# Enhancement weights
+enhancements:
+  # Beta constraint (논문 Eq. 5)
+  beta_constraint: 5.0  # |βi| < 5
+
+  # Bone length constraints
+  bone_length_weight: 100.0  # Absolute bone length matching
+  bone_length_soft_weight: 0.1  # Bone length consistency across frames
+  bone_length_ratio_weight: 0.5  # Bone length ratio (femur/tibia, etc.)
+
+  # Bone direction matching
+  bone_direction_weight: 0.5  # Bone direction cosine similarity
+
+  # Velocity smoothness (논문 Eq. 8, λ=0.05)
+  velocity_smooth_weight: 0.15  # Increased from 0.05 for smoother motion
+
+  # Joint angle limits
+  angle_limit_weight: 1.0  # Biomechanical angle constraints
+
+  # Ground penetration penalty
+  ground_penetration_weight: 10.0  # Strong penalty for feet below ground
+
+  # Contact-aware optimization
+  contact_weight_multiplier: 2.0  # Multiplier when foot contacts ground
+
+# Per-joint learning rates (multipliers relative to base LR)
+joint_learning_rates:
+  foot_lr: 0.005  # Lower LR for feet (more stable)
+  knee_lr: 0.01   # Medium LR for knees
+  hip_lr: 0.015   # Higher LR for hips (more DOF)
+  shoulder_lr: 0.008  # Medium-low LR for shoulders
+  elbow_lr: 0.007     # Lower LR for elbows (noise-prone)
+  wrist_lr: 0.005     # Lowest LR for wrists (most unstable)
+
+# Early stopping parameters
+early_stopping:
+  enabled: true
+  min_iters: 10  # Minimum iterations before checking convergence
+  shape_threshold: 1.0e-6  # Convergence threshold for shape optimization
+  pose_threshold: 1.0e-5   # Convergence threshold for pose optimization
+  sequence_threshold: 1.0e-5  # Convergence threshold for sequence refinement
+
+# Convergence criteria
+convergence:
+  tolerance_mm: 20.0  # Stop if MPJPE < this threshold (millimeters)
+  max_passes: 1  # Maximum refinement passes
+
+# Smart keyframe sampling
+keyframe_sampling:
+  enabled: true
+  strategy: 'movement_based'  # Options: 'movement_based', 'uniform'
+  prioritize_high_movement: true  # Select frames with high joint velocity
+
+# GPU memory optimization
+gpu_optimization:
+  mixed_precision: true  # Use FP16 for faster computation (CUDA only)
+  gradient_checkpointing: false  # Trade computation for memory (not implemented)
+
+# Logging and checkpointing
+logging:
+  tensorboard: false  # Enable TensorBoard logging (not implemented yet)
+  print_frequency: 10  # Print loss every N iterations
+  save_checkpoints: false  # Save intermediate checkpoints (not implemented yet)
+
+# Dataset-specific options
+dataset:
+  lower_body_only: false  # Fit only lower body joints (for No_Arm datasets)
+  include_head_neck: false  # Include head/neck joints (for With_Arm datasets, 교수님 요청)
+
+# ENHANCEMENT: Adaptive frame sampling (교수님 요청 - 긴 시퀀스 처리)
+frame_sampling:
+  enabled: true  # Enable adaptive frame sampling
+  max_frames: 500  # Maximum frames to optimize (longer sequences sampled uniformly)
+  # Example: 2,000 frames → stride 4 → 500 frames (4× faster)
+
+# SMPL model path (can be overridden by command-line)
+smpl_model_path: 'models/smpl_model.pkl'
