@@ -1,0 +1,41 @@
+{
+  "description": "6 With_Arm subjects for 64-frame baseline pilot test (physics disabled)",
+  "subjects": [
+    {
+      "name": "Tiziana_Subject6",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Tiziana2019_Formatted_With_Arm/Subject6/Subject6.b3d",
+      "study": "Tiziana2019",
+      "category": "short"
+    },
+    {
+      "name": "Tiziana_Subject43",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Tiziana2019_Formatted_With_Arm/Subject43/Subject43.b3d",
+      "study": "Tiziana2019",
+      "category": "short"
+    },
+    {
+      "name": "Falisse_subject8",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Falisse2017_Formatted_With_Arm/subject_8/subject_8.b3d",
+      "study": "Falisse2017",
+      "category": "medium"
+    },
+    {
+      "name": "Falisse_subject9",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Falisse2017_Formatted_With_Arm/subject_9/subject_9.b3d",
+      "study": "Falisse2017",
+      "category": "medium"
+    },
+    {
+      "name": "Carter_P036_split5",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Carter2023_Formatted_With_Arm/P036_split5/P036_split5.b3d",
+      "study": "Carter2023",
+      "category": "long"
+    },
+    {
+      "name": "Carter_P022_split3",
+      "path": "/egr/research-zijunlab/kwonjoon/Dataset/AddB/train/With_Arm/Carter2023_Formatted_With_Arm/P022_split3/P022_split3.b3d",
+      "study": "Carter2023",
+      "category": "long"
+    }
+  ]
+}

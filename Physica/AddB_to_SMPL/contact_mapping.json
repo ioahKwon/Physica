@@ -1,0 +1,162 @@
+{
+  "calcn_r": {
+    "smpl_part": "right_heel",
+    "smpl_vertices": [
+      6728,
+      6729,
+      6730,
+      6731,
+      6732
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map calcn_r GRF to SMPL right_heel vertices using CoP-based Gaussian distribution"
+  },
+  "calcn_l": {
+    "smpl_part": "left_heel",
+    "smpl_vertices": [
+      3387,
+      3388,
+      3389,
+      3390,
+      3391
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map calcn_l GRF to SMPL left_heel vertices using CoP-based Gaussian distribution"
+  },
+  "toes_r": {
+    "smpl_part": "right_toes",
+    "smpl_vertices": [
+      6801,
+      6802,
+      6803,
+      6804,
+      6805,
+      6806
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map toes_r GRF to SMPL right_toes vertices using CoP-based Gaussian distribution"
+  },
+  "toes_l": {
+    "smpl_part": "left_toes",
+    "smpl_vertices": [
+      3460,
+      3461,
+      3462,
+      3463,
+      3464,
+      3465
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map toes_l GRF to SMPL left_toes vertices using CoP-based Gaussian distribution"
+  },
+  "hand_r": {
+    "smpl_part": "right_hand",
+    "smpl_vertices": [
+      5782,
+      5783,
+      5784,
+      5785,
+      5786
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map hand_r GRF to SMPL right_hand vertices using CoP-based Gaussian distribution"
+  },
+  "hand_l": {
+    "smpl_part": "left_hand",
+    "smpl_vertices": [
+      2445,
+      2446,
+      2447,
+      2448,
+      2449
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map hand_l GRF to SMPL left_hand vertices using CoP-based Gaussian distribution"
+  },
+  "talus_r": {
+    "smpl_part": "right_heel",
+    "smpl_vertices": [
+      6728,
+      6729,
+      6730,
+      6731,
+      6732
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map talus_r GRF to SMPL right_heel vertices using CoP-based Gaussian distribution"
+  },
+  "talus_l": {
+    "smpl_part": "left_heel",
+    "smpl_vertices": [
+      3387,
+      3388,
+      3389,
+      3390,
+      3391
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map talus_l GRF to SMPL left_heel vertices using CoP-based Gaussian distribution"
+  },
+  "calcn_right": {
+    "smpl_part": "right_heel",
+    "smpl_vertices": [
+      6728,
+      6729,
+      6730,
+      6731,
+      6732
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map calcn_right GRF to SMPL right_heel vertices using CoP-based Gaussian distribution"
+  },
+  "calcn_left": {
+    "smpl_part": "left_heel",
+    "smpl_vertices": [
+      3387,
+      3388,
+      3389,
+      3390,
+      3391
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map calcn_left GRF to SMPL left_heel vertices using CoP-based Gaussian distribution"
+  },
+  "toes_right": {
+    "smpl_part": "right_toes",
+    "smpl_vertices": [
+      6801,
+      6802,
+      6803,
+      6804,
+      6805,
+      6806
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map toes_right GRF to SMPL right_toes vertices using CoP-based Gaussian distribution"
+  },
+  "toes_left": {
+    "smpl_part": "left_toes",
+    "smpl_vertices": [
+      3460,
+      3461,
+      3462,
+      3463,
+      3464,
+      3465
+    ],
+    "sigma": 0.05,
+    "distribution_method": "gaussian_cop",
+    "description": "Map toes_left GRF to SMPL left_toes vertices using CoP-based Gaussian distribution"
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "template_mappings": {
+    "pelvis_tx": {
+      "smpl_dof_idx": 0,
+      "smpl_dof_name": "pelvis_tx"
+    },
+    "pelvis_ty": {
+      "smpl_dof_idx": 1,
+      "smpl_dof_name": "pelvis_ty"
+    },
+    "pelvis_tz": {
+      "smpl_dof_idx": 2,
+      "smpl_dof_name": "pelvis_tz"
+    },
+    "pelvis_tilt": {
+      "smpl_dof_idx": 3,
+      "smpl_dof_name": "pelvis_rx"
+    },
+    "pelvis_list": {
+      "smpl_dof_idx": 4,
+      "smpl_dof_name": "pelvis_ry"
+    },
+    "pelvis_rotation": {
+      "smpl_dof_idx": 5,
+      "smpl_dof_name": "pelvis_rz"
+    },
+    "hip_flexion_r": {
+      "smpl_dof_idx": 6,
+      "smpl_dof_name": "right_hip_rx"
+    },
+    "hip_adduction_r": {
+      "smpl_dof_idx": 7,
+      "smpl_dof_name": "right_hip_ry"
+    },
+    "hip_rotation_r": {
+      "smpl_dof_idx": 8,
+      "smpl_dof_name": "right_hip_rz"
+    },
+    "hip_flexion_l": {
+      "smpl_dof_idx": 9,
+      "smpl_dof_name": "left_hip_rx"
+    },
+    "hip_adduction_l": {
+      "smpl_dof_idx": 10,
+      "smpl_dof_name": "left_hip_ry"
+    },
+    "hip_rotation_l": {
+      "smpl_dof_idx": 11,
+      "smpl_dof_name": "left_hip_rz"
+    },
+    "lumbar_extension": {
+      "smpl_dof_idx": 12,
+      "smpl_dof_name": "spine1_rx"
+    },
+    "lumbar_bending": {
+      "smpl_dof_idx": 13,
+      "smpl_dof_name": "spine1_ry"
+    },
+    "lumbar_rotation": {
+      "smpl_dof_idx": 14,
+      "smpl_dof_name": "spine1_rz"
+    },
+    "knee_angle_r": {
+      "smpl_dof_idx": 15,
+      "smpl_dof_name": "right_knee_rx"
+    },
+    "knee_angle_l": {
+      "smpl_dof_idx": 18,
+      "smpl_dof_name": "left_knee_rx"
+    },
+    "ankle_angle_r": {
+      "smpl_dof_idx": 21,
+      "smpl_dof_name": "right_ankle_rx"
+    },
+    "ankle_angle_l": {
+      "smpl_dof_idx": 24,
+      "smpl_dof_name": "left_ankle_rx"
+    },
+    "subtalar_angle_r": {
+      "smpl_dof_idx": 33,
+      "smpl_dof_name": "right_foot_rx"
+    },
+    "subtalar_angle_l": {
+      "smpl_dof_idx": 30,
+      "smpl_dof_name": "left_foot_rx"
+    }
+  },
+  "smpl_dof_names": [
+    "pelvis_tx",
+    "pelvis_ty",
+    "pelvis_tz",
+    "pelvis_rx",
+    "pelvis_ry",
+    "pelvis_rz",
+    "left_hip_rx",
+    "left_hip_ry",
+    "left_hip_rz",
+    "right_hip_rx",
+    "right_hip_ry",
+    "right_hip_rz",
+    "spine1_rx",
+    "spine1_ry",
+    "spine1_rz",
+    "left_knee_rx",
+    "left_knee_ry",
+    "left_knee_rz",
+    "right_knee_rx",
+    "right_knee_ry",
+    "right_knee_rz",
+    "spine2_rx",
+    "spine2_ry",
+    "spine2_rz",
+    "left_ankle_rx",
+    "left_ankle_ry",
+    "left_ankle_rz",
+    "right_ankle_rx",
+    "right_ankle_ry",
+    "right_ankle_rz",
+    "spine3_rx",
+    "spine3_ry",
+    "spine3_rz",
+    "left_foot_rx",
+    "left_foot_ry",
+    "left_foot_rz",
+    "right_foot_rx",
+    "right_foot_ry",
+    "right_foot_rz",
+    "neck_rx",
+    "neck_ry",
+    "neck_rz",
+    "left_collar_rx",
+    "left_collar_ry",
+    "left_collar_rz",
+    "right_collar_rx",
+    "right_collar_ry",
+    "right_collar_rz",
+    "head_rx",
+    "head_ry",
+    "head_rz",
+    "left_shoulder_rx",
+    "left_shoulder_ry",
+    "left_shoulder_rz",
+    "right_shoulder_rx",
+    "right_shoulder_ry",
+    "right_shoulder_rz",
+    "left_elbow_rx",
+    "left_elbow_ry",
+    "left_elbow_rz",
+    "right_elbow_rx",
+    "right_elbow_ry",
+    "right_elbow_rz",
+    "left_wrist_rx",
+    "left_wrist_ry",
+    "left_wrist_rz",
+    "right_wrist_rx",
+    "right_wrist_ry",
+    "right_wrist_rz",
+    "left_hand_rx",
+    "left_hand_ry",
+    "left_hand_rz",
+    "right_hand_rx",
+    "right_hand_ry",
+    "right_hand_rz"
+  ],
+  "approximations": {
+    "30-32": {
+      "source": "ankle_angle_l",
+      "scale": 0.1,
+      "description": "Approximate toe DOFs from ankle"
+    },
+    "33-35": {
+      "source": "ankle_angle_r",
+      "scale": 0.1,
+      "description": "Approximate toe DOFs from ankle"
+    },
+    "66-68": {
+      "source": "wrist_angle_r",
+      "scale": 0.05,
+      "description": "Approximate hand DOFs from wrist (if available)"
+    },
+    "63-65": {
+      "source": "wrist_angle_l",
+      "scale": 0.05,
+      "description": "Approximate hand DOFs from wrist (if available)"
+    }
+  },
+  "zeros": [],
+  "notes": "This is a TEMPLATE mapping. Actual AddB DOF names vary by subject/dataset. Use this as a reference and adjust mapping based on actual DOF names from physics_metadata.json. Common variations: hip_flexion vs hip_flexion_r, knee_angle vs knee_flexion, etc."
+}

@@ -1,0 +1,178 @@
+================================================================================
+      AddBiomechanics, SKEL, SMPL Model Joint Definition Comparison
+================================================================================
+
+1. Basic Information
+================================================================================
+
+Model           | Joints    | DOF           | Based On
+----------------|-----------|---------------|------------------
+AddBiomechanics | 20        | Variable      | Rajagopal (Biomechanics)
+SKEL            | 24        | 46 (Euler)    | Anatomical Skeleton
+SMPL            | 24        | 72 (Axis-Ang) | Statistical Body Model
+
+================================================================================
+2. AddBiomechanics (20 Joints)
+================================================================================
+
+Index | Joint Name      | Description
+------|-----------------|------------------------------------------------
+0     | pelvis          | Root joint, global position/rotation
+1     | femur_r         | Right hip joint
+2     | tibia_r         | Right knee joint
+3     | talus_r         | Right ankle joint
+4     | calcn_r         | Right heel (calcaneus)
+5     | toes_r          | Right toe joint
+6     | femur_l         | Left hip joint
+7     | tibia_l         | Left knee joint
+8     | talus_l         | Left ankle joint
+9     | calcn_l         | Left heel (calcaneus)
+10    | toes_l          | Left toe joint
+11    | torso           | Upper body/trunk (lumbar)
+12    | acromial_r      | Right shoulder tip (acromion)
+13    | elbow_r         | Right elbow joint
+14    | radius_r        | Right wrist joint
+15    | hand_r          | Right hand center
+16    | acromial_l      | Left shoulder tip (acromion)
+17    | elbow_l         | Left elbow joint
+18    | radius_l        | Left wrist joint
+19    | hand_l          | Left hand center
+
+* Features: Biomechanics-based, optimized for clinical/sports analysis
+
+================================================================================
+3. SKEL (24 Joints)
+================================================================================
+
+Index | Joint Name      | Description
+------|-----------------|------------------------------------------------
+0     | pelvis          | Root joint
+1     | femur_r         | Right hip joint
+2     | tibia_r         | Right knee
+3     | talus_r         | Right ankle
+4     | calcn_r         | Right heel
+5     | toes_r          | Right toes
+6     | femur_l         | Left hip joint
+7     | tibia_l         | Left knee
+8     | talus_l         | Left ankle
+9     | calcn_l         | Left heel
+10    | toes_l          | Left toes
+11    | lumbar          | Lumbar spine
+12    | thorax          | Thoracic spine
+13    | head            | Neck + Head
+14    | scapula_r       | Right scapula (close to spine, medial)
+15    | humerus_r       | Right shoulder-arm connection (GH joint)
+16    | ulna_r          | Right elbow
+17    | radius_r        | Right forearm rotation
+18    | hand_r          | Right wrist
+19    | scapula_l       | Left scapula
+20    | humerus_l       | Left shoulder-arm connection
+21    | ulna_l          | Left elbow
+22    | radius_l        | Left forearm rotation
+23    | hand_l          | Left wrist
+
+* Features:
+  - Anatomically accurate skeletal structure
+  - Separate scapula and humerus joints
+  - Separate ulna and radius for forearm rotation
+
+================================================================================
+4. SMPL (24 Joints)
+================================================================================
+
+Index | Joint Name      | Description
+------|-----------------|------------------------------------------------
+0     | pelvis          | Root joint
+1     | L_Hip           | Left hip
+2     | R_Hip           | Right hip
+3     | spine1          | Lower spine
+4     | L_Knee          | Left knee
+5     | R_Knee          | Right knee
+6     | spine2          | Middle spine
+7     | L_Ankle         | Left ankle
+8     | R_Ankle         | Right ankle
+9     | spine3          | Upper spine
+10    | L_Foot          | Left foot
+11    | R_Foot          | Right foot
+12    | neck            | Neck
+13    | L_Collar        | Left collar (near shoulder)
+14    | R_Collar        | Right collar (near shoulder)
+15    | head            | Head
+16    | L_Shoulder      | Left shoulder
+17    | R_Shoulder      | Right shoulder
+18    | L_Elbow         | Left elbow
+19    | R_Elbow         | Right elbow
+20    | L_Wrist         | Left wrist
+21    | R_Wrist         | Right wrist
+22    | L_Hand          | Left hand
+23    | R_Hand          | Right hand
+
+* Features:
+  - Statistical body model (PCA-based shape)
+  - Simplified shoulder structure (no scapula)
+  - Widely used in computer vision/graphics
+
+================================================================================
+5. Key Differences
+================================================================================
+
+[ AddB vs SKEL ]
+--------------------------------------------------------------------------------
+Aspect            | AddBiomechanics        | SKEL
+------------------|------------------------|----------------------------
+Shoulder          | acromial (acromion)    | scapula + humerus (separate)
+Spine             | torso (single)         | lumbar + thorax (separate)
+Forearm           | radius only            | ulna + radius (rotation)
+Foot              | calcn + toes           | calcn + toes (same)
+Neck/Head         | None                   | head (present)
+
+- Current mapping: acromial -> humerus (shoulder-arm connection)
+  * scapula is too medial (close to spine), doesn't match acromial position
+  * humerus is the actual shoulder-arm connection point, better fit
+
+[ AddB vs SMPL ]
+--------------------------------------------------------------------------------
+Aspect            | AddBiomechanics        | SMPL
+------------------|------------------------|----------------------------
+Joint count       | 20                     | 24
+Shoulder          | acromial               | Collar + Shoulder
+Spine             | torso                  | spine1/2/3 (3 levels)
+Foot structure    | talus + calcn + toes   | Ankle + Foot (simplified)
+Hand structure    | radius + hand          | Wrist + Hand
+
+- Biomechanical accuracy: AddB >> SMPL
+- Graphics compatibility: SMPL >> AddB
+
+[ SKEL vs SMPL ]
+--------------------------------------------------------------------------------
+Aspect            | SKEL                   | SMPL
+------------------|------------------------|----------------------------
+DOF               | 46 (Euler)             | 72 (Axis-angle)
+Shoulder          | scapula + humerus      | Collar + Shoulder
+Spine             | lumbar + thorax        | spine1/2/3
+Forearm rotation  | ulna + radius (yes)    | Not possible
+Foot structure    | talus + calcn + toes   | Ankle + Foot
+
+- Anatomical accuracy: SKEL >> SMPL
+- Deep learning compatibility: SMPL >> SKEL
+- Forearm rotation: Only SKEL can represent this
+
+================================================================================
+6. Shoulder Mapping Problem Resolution Summary
+================================================================================
+
+[Problem]
+- AddB's acromial (acromion) doesn't directly correspond to any SKEL joint
+- Initial acromial -> scapula mapping: Predicted shoulders too narrow
+
+[Attempted Solutions]
+1. acromial -> scapula: Failed (scapula is too close to spine)
+2. Virtual shoulder (weighted avg of scapula + humerus): Failed (arm position wrong)
+3. acromial -> humerus: Success! (MPJPE 26.3mm)
+
+[Final Solution]
+- Use acromial -> humerus mapping
+- Humerus is the actual glenohumeral joint (shoulder-arm connection)
+- Position matches better with AddB's acromial marker
+
+================================================================================

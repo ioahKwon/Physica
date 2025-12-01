@@ -70,32 +70,62 @@ def _with_zeros(mat: torch.Tensor) -> torch.Tensor:
 def _batch_rigid_transform(rot_mats: torch.Tensor,
                            joints: torch.Tensor,
                            parents: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Apply batch rigid transformations to joints using forward kinematics.
+
+    This follows the standard SMPL/SMPL-X LBS implementation:
+    1. Build local transforms for each joint
+    2. Chain them through the kinematic hierarchy
+    3. Compute relative transforms for skinning
+
+    For LBS, each vertex v near joint j is transformed as:
+        v_posed = R_j @ (v - J_j_rest) + J_j_posed
+                = R_j @ v + (J_j_posed - R_j @ J_j_rest)
+
+    So the relative transform has:
+        - Rotation: R_j (unchanged from world transform)
+        - Translation: J_j_posed - R_j @ J_j_rest
+    """
     batch_size = rot_mats.shape[0]
     num_joints = rot_mats.shape[1]
     device = rot_mats.device
 
-    joints = joints.unsqueeze(-1)
+    # Save rest pose joints before modification
+    joints_rest = joints.clone()  # [B, J, 3]
+
+    joints = joints.unsqueeze(-1)  # [B, J, 3, 1]
     rel_joints = joints.clone()
     rel_joints[:, 1:] = joints[:, 1:] - joints[:, parents[1:]]
 
-    transforms_mat = torch.cat([rot_mats, rel_joints], dim=-1)
-    transforms_mat = transforms_mat.view(-1, 3, 4)
-    transforms_mat = _with_zeros(transforms_mat)
-    transforms_mat = transforms_mat.view(batch_size, num_joints, 4, 4)
+    # Build local transform matrices [R | t]
+    transforms_mat = torch.cat([rot_mats, rel_joints], dim=-1)  # [B, J, 3, 4]
 
-    transforms = []
-    for i in range(num_joints):
+    # Add [0, 0, 0, 1] row to make 4x4
+    padding = torch.zeros(batch_size, num_joints, 1, 4, device=device)
+    padding[:, :, :, 3] = 1
+    transforms_mat = torch.cat([transforms_mat, padding], dim=2)  # [B, J, 4, 4]
+
+    # Forward kinematics: chain transforms through the kinematic tree
+    transforms = [transforms_mat[:, 0]]
+    for i in range(1, num_joints):
         parent = parents[i].item()
-        if parent == -1:
-            transforms.append(transforms_mat[:, i])
-        else:
-            transforms.append(torch.matmul(transforms[parent], transforms_mat[:, i]))
-    transforms = torch.stack(transforms, dim=1)
+        transforms.append(torch.matmul(transforms[parent], transforms_mat[:, i]))
+    transforms = torch.stack(transforms, dim=1)  # [B, J, 4, 4]
 
-    joints_posed = transforms[:, :, :3, 3]
-    joints_homo = torch.cat([joints_posed, torch.ones(batch_size, num_joints, 1, device=device)], dim=2).unsqueeze(-1)
-    transforms_rel = transforms - torch.matmul(transforms, joints_homo)
-    return transforms_rel, joints_posed
+    # Extract posed joint positions from world transforms
+    posed_joints = transforms[:, :, :3, 3]  # [B, J, 3]
+
+    # Compute relative transforms for LBS skinning
+    # For each joint j: new_translation = J_j_posed - R_j @ J_j_rest
+    rot_part = transforms[:, :, :3, :3]  # [B, J, 3, 3]
+    rotated_rest_joints = torch.matmul(rot_part, joints_rest.unsqueeze(-1)).squeeze(-1)  # [B, J, 3]
+    new_trans = posed_joints - rotated_rest_joints  # [B, J, 3]
+
+    # Build relative transforms: keep rotation, update translation
+    rel_transforms = transforms.clone()
+    rel_transforms[:, :, :3, 3] = new_trans
+
+    return rel_transforms, posed_joints
 
 
 def _lbs(betas: torch.Tensor,
@@ -133,12 +163,28 @@ def _lbs(betas: torch.Tensor,
     return vertices, joints_global
 
 
+# SMPL model paths for different genders
+SMPL_MODEL_DIR = '/egr/research-zijunlab/kwonjoon/01_Code/SMPL_python_v.1.1.0/smpl/models'
+SMPL_MODEL_FILES = {
+    'male': 'basicmodel_m_lbs_10_207_0_v1.1.0.pkl',
+    'female': 'basicmodel_f_lbs_10_207_0_v1.1.0.pkl',
+    'neutral': 'basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl',
+}
+
+
 @dataclass
 class SMPLModel:
-    model_path: str
+    model_path: str = None
+    gender: str = 'neutral'
     device: torch.device = torch.device('cpu')
 
     def __post_init__(self) -> None:
+        # If model_path not provided, use gender to select model
+        if self.model_path is None:
+            if self.gender not in SMPL_MODEL_FILES:
+                raise ValueError(f"Invalid gender: {self.gender}. Must be 'male', 'female', or 'neutral'")
+            self.model_path = os.path.join(SMPL_MODEL_DIR, SMPL_MODEL_FILES[self.gender])
+
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"SMPL model file not found: {self.model_path}")
 

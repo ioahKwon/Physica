@@ -208,7 +208,7 @@ def load_b3d_sequence(b3d_path: str,
                       trial: int = 0,
                       processing_pass: int = 0,
                       start: int = 0,
-                      num_frames: int = -1) -> Tuple[np.ndarray, float]:
+                      num_frames: int = -1) -> Tuple[np.ndarray, float, Dict]:
     subj = nimble.biomechanics.SubjectOnDisk(b3d_path)
     total = subj.getTrialLength(trial)
     count = total - start if num_frames < 0 else min(num_frames, total - start)
@@ -218,7 +218,7 @@ def load_b3d_sequence(b3d_path: str,
         startFrame=start,
         numFramesToRead=count,
         includeProcessingPasses=True,
-        includeSensorData=False,
+        includeSensorData=True,  # CHANGED: Enable physics data extraction
         stride=1,
         contactThreshold=1.0
     )
@@ -241,8 +241,125 @@ def load_b3d_sequence(b3d_path: str,
         data = frame_joint_centers(frame)
         joints[i] = data.reshape(-1, 3)[:num_joints]
 
+    # Extract ALL physics data from frames
+    physics_data = extract_physics_data(frames, processing_pass)
+
     dt = float(subj.getTrialTimestep(trial))
-    return joints, dt
+    return joints, dt, physics_data
+
+
+def extract_physics_data(frames, processing_pass: int = 0) -> Dict:
+    """Extract all available biomechanical/physics data from AddBiomechanics frames"""
+    physics = {
+        'ground_reaction_forces': [],
+        'ground_reaction_moments': [],
+        'center_of_pressure': [],
+        'joint_torques': [],
+        'joint_accelerations': [],
+        'joint_velocities': [],
+        'residual_forces': [],
+        'residual_moments': [],
+        'com_positions': [],
+        'com_velocities': [],
+        'com_accelerations': [],
+    }
+
+    for frame in frames:
+        # Use processing pass data if available
+        if hasattr(frame, 'processingPasses') and len(frame.processingPasses) > 0:
+            idx = min(processing_pass, len(frame.processingPasses) - 1)
+            pp = frame.processingPasses[idx]
+
+            # Ground reaction forces (GRF)
+            if hasattr(pp, 'groundContactForce'):
+                physics['ground_reaction_forces'].append(np.asarray(pp.groundContactForce, dtype=np.float32))
+            elif hasattr(frame, 'grfBodyForce'):
+                physics['ground_reaction_forces'].append(np.asarray(frame.grfBodyForce, dtype=np.float32))
+            else:
+                physics['ground_reaction_forces'].append(None)
+
+            # Ground reaction moments
+            if hasattr(pp, 'groundContactTorque'):
+                physics['ground_reaction_moments'].append(np.asarray(pp.groundContactTorque, dtype=np.float32))
+            elif hasattr(frame, 'grfBodyTorque'):
+                physics['ground_reaction_moments'].append(np.asarray(frame.grfBodyTorque, dtype=np.float32))
+            else:
+                physics['ground_reaction_moments'].append(None)
+
+            # Center of pressure
+            if hasattr(pp, 'groundContactCenterOfPressure'):
+                physics['center_of_pressure'].append(np.asarray(pp.groundContactCenterOfPressure, dtype=np.float32))
+            elif hasattr(frame, 'cop'):
+                physics['center_of_pressure'].append(np.asarray(frame.cop, dtype=np.float32))
+            else:
+                physics['center_of_pressure'].append(None)
+
+            # Joint torques (tau)
+            if hasattr(pp, 'tau'):
+                physics['joint_torques'].append(np.asarray(pp.tau, dtype=np.float32))
+            else:
+                physics['joint_torques'].append(None)
+
+            # Joint accelerations (ddq)
+            if hasattr(pp, 'acc'):
+                physics['joint_accelerations'].append(np.asarray(pp.acc, dtype=np.float32))
+            elif hasattr(pp, 'ddq'):
+                physics['joint_accelerations'].append(np.asarray(pp.ddq, dtype=np.float32))
+            else:
+                physics['joint_accelerations'].append(None)
+
+            # Joint velocities (dq)
+            if hasattr(pp, 'vel'):
+                physics['joint_velocities'].append(np.asarray(pp.vel, dtype=np.float32))
+            elif hasattr(pp, 'dq'):
+                physics['joint_velocities'].append(np.asarray(pp.dq, dtype=np.float32))
+            else:
+                physics['joint_velocities'].append(None)
+
+            # Residual forces
+            if hasattr(pp, 'residualWrenchInRootFrame'):
+                physics['residual_forces'].append(np.asarray(pp.residualWrenchInRootFrame[:3], dtype=np.float32))
+            else:
+                physics['residual_forces'].append(None)
+
+            # Residual moments
+            if hasattr(pp, 'residualWrenchInRootFrame'):
+                physics['residual_moments'].append(np.asarray(pp.residualWrenchInRootFrame[3:], dtype=np.float32))
+            else:
+                physics['residual_moments'].append(None)
+
+            # Center of mass
+            if hasattr(pp, 'comPos'):
+                physics['com_positions'].append(np.asarray(pp.comPos, dtype=np.float32))
+            else:
+                physics['com_positions'].append(None)
+
+            if hasattr(pp, 'comVel'):
+                physics['com_velocities'].append(np.asarray(pp.comVel, dtype=np.float32))
+            else:
+                physics['com_velocities'].append(None)
+
+            if hasattr(pp, 'comAcc'):
+                physics['com_accelerations'].append(np.asarray(pp.comAcc, dtype=np.float32))
+            else:
+                physics['com_accelerations'].append(None)
+        else:
+            # No processing passes - fill with None
+            for key in physics.keys():
+                physics[key].append(None)
+
+    # Convert lists to numpy arrays (or None if all are None)
+    result = {}
+    for key, values in physics.items():
+        if all(v is None for v in values):
+            result[key] = None
+        else:
+            # Filter out None values and stack
+            valid_values = [v if v is not None else np.zeros_like(next(vv for vv in values if vv is not None))
+                           for v in values]
+            result[key] = np.array(valid_values, dtype=np.float32)
+
+    return result
 
 
 def convert_addb_to_smpl_coords(joints: np.ndarray) -> np.ndarray:
@@ -1462,8 +1579,18 @@ class AddBToSMPLFitter:
 
                 diff = pred_subset[mask] - target_subset[mask]
 
-                # Simple uniform weighting (FIXED9/FIXED11)
-                loss = (diff ** 2).mean()
+                # Per-joint weighting: Give higher weight to foot joints (SMPL indices 10, 11)
+                # This ensures feet are well-optimized
+                joint_weights = torch.ones(len(self.smpl_indices), device=self.device)
+                for i, smpl_idx in enumerate(self.smpl_indices):
+                    if smpl_idx in [10, 11]:  # left_foot, right_foot
+                        joint_weights[i] = 3.0  # 3x weight for feet
+                    elif smpl_idx in [7, 8]:  # left_ankle, right_ankle
+                        joint_weights[i] = 2.0  # 2x weight for ankles
+
+                # Apply per-joint weights to the masked differences
+                weighted_diff = diff * torch.sqrt(joint_weights[mask].unsqueeze(1))
+                loss = (weighted_diff ** 2).mean()
 
                 # Enhancement 3: Get stage-specific bone weights
                 bone_weights = self._get_stage_bone_weights(iter_idx, num_iters)
@@ -1606,7 +1733,17 @@ class AddBToSMPLFitter:
                     continue
 
                 diff = pred_subset[mask] - target_subset[mask]
-                pos_loss = (diff ** 2).mean()
+
+                # Per-joint weighting: Give higher weight to foot joints (SMPL indices 10, 11)
+                joint_weights = torch.ones(len(self.smpl_indices), device=self.device)
+                for i, smpl_idx in enumerate(self.smpl_indices):
+                    if smpl_idx in [10, 11]:  # left_foot, right_foot
+                        joint_weights[i] = 3.0  # 3x weight for feet
+                    elif smpl_idx in [7, 8]:  # left_ankle, right_ankle
+                        joint_weights[i] = 2.0  # 2x weight for ankles
+
+                weighted_diff = diff * torch.sqrt(joint_weights[mask].unsqueeze(1))
+                pos_loss = (weighted_diff ** 2).mean()
 
                 # Enhancement 3 & 4: Bone direction loss with stage weights + contact
                 contact_mask = contact_masks[t]  # [2]
@@ -1964,7 +2101,7 @@ def main() -> None:
     print('=' * 80 + '\n')
 
     print('[1/5] Loading AddBiomechanics data...')
-    addb_joints_full, dt = load_b3d_sequence(
+    addb_joints_full, dt, physics_data_full = load_b3d_sequence(
         args.b3d,
         trial=args.trial,
         processing_pass=args.processing_pass,
@@ -1981,6 +2118,10 @@ def main() -> None:
     print(f'  Joints : {addb_joints_full.shape[1]}')
     print(f'  dt     : {dt:.6f} s ({1.0 / dt:.2f} fps)')
 
+    # Count available physics fields
+    physics_fields_count = sum(1 for v in physics_data_full.values() if v is not None)
+    print(f'  Physics fields: {physics_fields_count}/{len(physics_data_full)}')
+
     # ENHANCEMENT: Adaptive frame sampling (교수님 요청 - 긴 시퀀스 처리)
     if not args.disable_frame_sampling and addb_joints_full.shape[0] > args.max_frames_optimize:
         print(f'\n  Adaptive frame sampling enabled (max_frames={args.max_frames_optimize}):')
@@ -1988,9 +2129,20 @@ def main() -> None:
             addb_joints_full,
             max_frames=args.max_frames_optimize
         )
+
+        # Apply SAME sampling to physics data
+        physics_data = {}
+        for key, data in physics_data_full.items():
+            if data is not None and len(data) > 0:
+                physics_data[key] = data[selected_frame_indices]
+            else:
+                physics_data[key] = None
+
         frame_sampling_enabled = True
+        print(f'    Physics data also sampled with same indices')
     else:
         addb_joints = addb_joints_full
+        physics_data = physics_data_full
         selected_frame_indices = np.arange(len(addb_joints))
         sampling_stride = 1
         frame_sampling_enabled = False
@@ -2091,6 +2243,14 @@ def main() -> None:
     np.save(os.path.join(out_dir, 'pred_joints.npy'), pred_joints)
     np.save(os.path.join(out_dir, 'target_joints.npy'), addb_joints)
 
+    # Save physics data
+    if physics_data:
+        physics_save_dict = {k: v for k, v in physics_data.items() if v is not None}
+        if physics_save_dict:
+            physics_path = os.path.join(out_dir, 'physics_data.npz')
+            np.savez(physics_path, **physics_save_dict)
+            print(f'  Physics data saved: {len(physics_save_dict)} fields')
+
     meta = {
         'b3d': args.b3d,
         'run_name': run_name,
@@ -2125,6 +2285,12 @@ def main() -> None:
         'joint_inclusion': {
             'lower_body_only': args.lower_body_only,
             'include_head_neck': args.include_head_neck,
+        },
+        # Physics data info
+        'physics_data': {
+            'saved': bool(physics_data and any(v is not None for v in physics_data.values())),
+            'fields': [k for k, v in physics_data.items() if v is not None] if physics_data else [],
+            'num_frames': int(addb_joints.shape[0]),
         },
     }
 

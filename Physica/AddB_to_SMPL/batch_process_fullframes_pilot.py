@@ -200,6 +200,10 @@ def main():
     config = OptimisationConfig(
         shape_iters=80,         # 150 → 80 (47% faster)
         pose_iters=50,          # 80 → 50 (38% faster)
+        pose_subsample_rate=48,  # Stage 3: 48x speedup (subsample every 48th frame)
+        sequence_enhancement_iters=25,  # Stage 4: 50 → 25 iterations (50% faster)
+        sequence_subsample_rate=4,  # Stage 4: subsample every 4th frame (75% faster)
+        sequence_batch_size=200,  # Stage 4: mini-batch SGD (60% faster)
         shape_sample_frames=200  # Max 200 frames for shape (will be adjusted per subject)
     )
 
@@ -244,6 +248,10 @@ def main():
             adaptive_config = OptimisationConfig(
                 shape_iters=80,
                 pose_iters=50,
+                pose_subsample_rate=48,  # Stage 3: 48x speedup
+                sequence_enhancement_iters=25,  # Stage 4: 25 iterations
+                sequence_subsample_rate=4,  # Stage 4: subsample rate 4
+                sequence_batch_size=200,  # Stage 4: batch size 200
                 shape_sample_frames=min(200, max(20, int(expected_frames * 0.15)))
             )
             

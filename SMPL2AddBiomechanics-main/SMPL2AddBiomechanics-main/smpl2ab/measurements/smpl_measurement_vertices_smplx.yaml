@@ -1,0 +1,112 @@
+BackBellyButton:
+  bc:
+  - 1.0
+  - 0.0
+  - 0.0
+  face_idx: 15139
+  vertex_id: 5494
+BellyButton:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 5236
+  vertex_id: 5940
+Crotch:
+  bc:
+  - 0.0
+  - 1.0
+  - 0.0
+  face_idx: 3151
+  vertex_id: 3736
+ElbowLeft:
+  bc:
+  - 1.0
+  - 0.0
+  - 0.0
+  face_idx: 5585
+  vertex_id: 4290
+ElbowRight:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 16949
+  vertex_id: 7032
+FingerTipLeft:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 3469
+  vertex_id: 5058
+FingerTipRight:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 7050
+  vertex_id: 7794
+HeadTop:
+  bc:
+  - 0.0
+  - 1.0
+  - 0.0
+  face_idx: 19737
+  vertex_id: 9003
+HeelLeft:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 15607
+  vertex_id: 8929
+NippleLeft:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 14565
+  vertex_id: 5646
+NippleRight:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 18398
+  vertex_id: 8340
+ShoulderApose:
+  bc:
+  - 1.0
+  - 0.0
+  - 0.0
+  face_idx: 8070
+  vertex_id: 5619
+ShoulderLeft:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 3865
+  vertex_id: 5468
+ShoulderRight:
+  bc:
+  - 1.0
+  - 0.0
+  - 0.0
+  face_idx: 17077
+  vertex_id: 7184
+WristLeft:
+  bc:
+  - 0.0
+  - 0.0
+  - 1.0
+  face_idx: 14664
+  vertex_id: 4713
+WristRight:
+  bc:
+  - 0.0
+  - 1.0
+  - 0.0
+  face_idx: 17249
+  vertex_id: 7449
