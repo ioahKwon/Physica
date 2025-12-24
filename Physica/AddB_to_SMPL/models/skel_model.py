@@ -343,6 +343,69 @@ class SKELModelWrapper:
             self.num_joints = SKEL_NUM_JOINTS
             self.joint_names = SKEL_JOINT_NAMES
 
+        # Dynamic shoulder regressor (set via set_shoulder_vertices)
+        self.shoulder_vertex_idx = None
+        self.shoulder_regressor = None
+
+    def set_shoulder_vertices(self, vertex_idx: Dict[str, List[int]]) -> None:
+        """
+        Set dynamic shoulder vertex indices for shoulder regressor.
+
+        This allows computing shoulder positions from mesh vertices that are
+        closest to AddB acromial positions (instead of using hardcoded indices).
+
+        Args:
+            vertex_idx: Dict with 'right' and 'left' keys, each containing list of vertex indices
+        """
+        self.shoulder_vertex_idx = vertex_idx
+
+        # Create shoulder regressor [2, 6890]
+        self.shoulder_regressor = torch.zeros(2, SKEL_NUM_VERTICES, device=self.device)
+
+        # Right shoulder (row 0): uniform weight over specified vertices
+        right_idx = vertex_idx['right']
+        k_r = len(right_idx)
+        self.shoulder_regressor[0, right_idx] = 1.0 / k_r
+
+        # Left shoulder (row 1): uniform weight over specified vertices
+        left_idx = vertex_idx['left']
+        k_l = len(left_idx)
+        self.shoulder_regressor[1, left_idx] = 1.0 / k_l
+
+        print(f"[SKELModelWrapper] Set shoulder_regressor with {k_r} right, {k_l} left vertices")
+
+    def compute_shoulder_positions(self, vertices: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute shoulder positions from mesh vertices using the dynamic regressor.
+
+        Args:
+            vertices: [B, 6890, 3] or [6890, 3] mesh vertices
+
+        Returns:
+            shoulder_r: [B, 3] or [3] right shoulder position
+            shoulder_l: [B, 3] or [3] left shoulder position
+        """
+        if self.shoulder_regressor is None:
+            raise ValueError("Shoulder vertices not set. Call set_shoulder_vertices() first.")
+
+        # Handle single frame case
+        single_frame = vertices.dim() == 2
+        if single_frame:
+            vertices = vertices.unsqueeze(0)  # [1, 6890, 3]
+
+        # Compute shoulder positions via einsum (same as joint regressor)
+        # shoulder_joints[b, j, k] = sum_i(vertices[b, i, k] * regressor[j, i])
+        shoulder_joints = torch.einsum('bik,ji->bjk', vertices, self.shoulder_regressor)  # [B, 2, 3]
+
+        shoulder_r = shoulder_joints[:, 0, :]  # [B, 3]
+        shoulder_l = shoulder_joints[:, 1, :]  # [B, 3]
+
+        if single_frame:
+            shoulder_r = shoulder_r.squeeze(0)  # [3]
+            shoulder_l = shoulder_l.squeeze(0)  # [3]
+
+        return shoulder_r, shoulder_l
+
     def _extend_joint_regressor_with_acromial(self) -> None:
         """
         Create acromial joint regressor rows following the professor's recommended approach.
@@ -395,6 +458,7 @@ class SKELModelWrapper:
         betas: torch.Tensor,
         poses: torch.Tensor,
         trans: Optional[torch.Tensor] = None,
+        dJ: Optional[torch.Tensor] = None,
         return_skeleton: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -413,6 +477,9 @@ class SKELModelWrapper:
                 - [3] → single translation
                 - [B, 3] or [T, 3] → batched/sequenced translations
                 - [B, T, 3] → batched sequences
+            dJ: Joint offset tensor (optional)
+                - [24, 3] → single offset for all joints
+                - [B, 24, 3] → batched joint offsets
             return_skeleton: If True, also return skeleton vertices (default: False)
 
         Returns:
@@ -485,6 +552,15 @@ class SKELModelWrapper:
                 B, T, _ = trans.shape
                 trans = trans.view(B * T, 3)
 
+        # dJ 처리
+        if dJ is not None:
+            dJ = dJ.to(self.device)
+            # dJ 차원 정규화: [24, 3] → [batch_size, 24, 3]
+            if dJ.ndim == 2:
+                dJ = dJ.unsqueeze(0).expand(batch_size, -1, -1)
+            elif dJ.shape[0] != batch_size:
+                dJ = dJ[:1].expand(batch_size, -1, -1)
+
         # SKEL forward 호출
         # Note: gradient 계산을 위해 torch.no_grad() 사용하지 않음
         output = self.model(
@@ -493,6 +569,7 @@ class SKELModelWrapper:
             trans=trans,
             poses_type='skel',
             skelmesh=return_skeleton,
+            dJ=dJ,
             pose_dep_bs=True
         )
 
