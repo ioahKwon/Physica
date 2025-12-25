@@ -1296,8 +1296,6 @@ def optimize_smpl(target_joints: np.ndarray, addb_joint_names: List[str],
 
 # SKEL ↔ AddB bone pair mapping for bone length loss
 # Format: (skel_parent_name, skel_child_name, addb_parent_name, addb_child_name)
-# NOTE: Joint mapping uses acromial → scapula, bone length uses scapula→ulna
-#       to match acromial→elbow distance
 SKEL_ADDB_BONE_LENGTH_PAIRS = [
     # Legs
     ('pelvis', 'femur_r', 'ground_pelvis', 'hip_r'),       # pelvis → hip_r
@@ -1308,12 +1306,12 @@ SKEL_ADDB_BONE_LENGTH_PAIRS = [
     ('tibia_l', 'talus_l', 'walker_knee_l', 'ankle_l'),    # tibia L
     ('talus_r', 'calcn_r', 'ankle_r', 'subtalar_r'),       # ankle → subtalar R
     ('talus_l', 'calcn_l', 'ankle_l', 'subtalar_l'),       # ankle → subtalar L
-    # Shoulder width (thorax → scapula)
-    ('thorax', 'scapula_r', 'back', 'acromial_r'),         # 등 → 어깨 (scapula) R
-    ('thorax', 'scapula_l', 'back', 'acromial_l'),         # 등 → 어깨 (scapula) L
-    # Upper arms (scapula → ulna to match acromial → elbow)
-    ('scapula_r', 'ulna_r', 'acromial_r', 'elbow_r'),      # 어깨(scapula) → 팔꿈치 R
-    ('scapula_l', 'ulna_l', 'acromial_l', 'elbow_l'),      # 어깨(scapula) → 팔꿈치 L
+    # Shoulder width (thorax → humerus: acromial이 humerus에 매핑됨)
+    ('thorax', 'humerus_r', 'back', 'acromial_r'),         # 등 → 어깨-팔 연결점 R
+    ('thorax', 'humerus_l', 'back', 'acromial_l'),         # 등 → 어깨-팔 연결점 L
+    # Upper arms (humerus → ulna)
+    ('humerus_r', 'ulna_r', 'acromial_r', 'elbow_r'),      # 어깨 → 팔꿈치 (상완) R
+    ('humerus_l', 'ulna_l', 'acromial_l', 'elbow_l'),      # 어깨 → 팔꿈치 (상완) L
     # Forearms
     ('ulna_r', 'hand_r', 'elbow_r', 'radius_hand_r'),      # forearm R (ulna → hand)
     ('ulna_l', 'hand_l', 'elbow_l', 'radius_hand_l'),      # forearm L
@@ -1856,17 +1854,15 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
             skel, betas.detach(), offset_r, offset_l, k=dynamic_acromial_k, device=device
         )
 
-    # Loss weights (original values)
-    bone_dir_weight = 0.3   # Bone direction loss
-    bone_length_weight = 1.0  # Bone length loss
+    # Loss weights (simplified for better MPJPE - reduced extra constraints)
+    bone_dir_weight = 0.1   # Reduced bone direction loss
+    bone_length_weight = 0.0  # DISABLED - was causing narrower shoulders
 
-    # Per-joint weights for important joints (pelvis, hips, spine, shoulders, arms)
+    # Per-joint weights for important joints (pelvis, hips, spine, shoulders)
     joint_weights = torch.ones(len(skel_indices), device=device)
     important_skel_joints = ['pelvis', 'femur_r', 'femur_l']  # 2.0x weight
     spine_joints = ['lumbar_body', 'thorax']  # 5.0x weight for spine alignment
-    shoulder_joints = ['scapula_r', 'scapula_l']  # Higher weight for shoulder fitting (acromial→scapula)
-    elbow_joints = ['ulna_r', 'ulna_l']  # Elbow matching (elbow→ulna)
-    hand_joints = ['hand_r', 'hand_l']  # Hand matching (radius_hand→hand)
+    shoulder_joints = ['scapula_r', 'scapula_l']  # Scapula mapping for wider shoulders
     for i, skel_idx in enumerate(skel_indices):
         # Use 24-joint names (no acromial extension)
         joint_name = SKEL_JOINT_NAMES[skel_idx].lower()
@@ -1875,14 +1871,8 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
         elif joint_name in spine_joints:
             joint_weights[i] = 5.0  # spine 정렬을 위해 높은 가중치
         elif joint_name in shoulder_joints:
-            # Higher weight for scapula (mapped from AddB acromial)
-            joint_weights[i] = 10.0
-        elif joint_name in elbow_joints:
-            # Higher weight for elbow (mapped from AddB elbow)
-            joint_weights[i] = 10.0
-        elif joint_name in hand_joints:
-            # Higher weight for hand (mapped from AddB radius_hand)
-            joint_weights[i] = 10.0
+            # Moderate weight for scapula (mapped from AddB acromial)
+            joint_weights[i] = 2.0
 
     # ==========================================================================
     # STAGE 2: Pose + Trans optimization (beta fixed)
@@ -1929,18 +1919,8 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
         bone_dir_loss = compute_bone_direction_loss(pred_joints, target, bone_pairs)
         loss = loss + bone_dir_weight * bone_dir_loss
 
-        # Regularization (pose only, no beta reg in stage 2)
-        loss = loss + 0.01 * (poses ** 2).mean()
-
-        # Spine/torso regularization
-        spine_dof_indices = list(range(17, 26))
-        spine_dofs = poses[:, spine_dof_indices]
-        loss = loss + 0.1 * (spine_dofs ** 2).mean()
-
-        # Scapula regularization
-        scapula_elev_indices = [27, 37]
-        scapula_elev = poses[:, scapula_elev_indices]
-        loss = loss + 0.05 * (scapula_elev ** 2).mean()
+        # Minimal regularization (simplified for better MPJPE)
+        loss = loss + 0.001 * (poses ** 2).mean()
 
         loss.backward()
         optimizer_pose.step()
@@ -2018,19 +1998,9 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
             shoulder_w_loss = compute_shoulder_width_loss(pred_joints, target_shoulder_width)
             loss = loss + shoulder_width_weight * shoulder_w_loss
 
-        # Regularization
-        loss = loss + 0.01 * (poses ** 2).mean()
-        loss = loss + 0.005 * (betas ** 2).mean()
-
-        # Spine/torso regularization
-        spine_dof_indices = list(range(17, 26))
-        spine_dofs = poses[:, spine_dof_indices]
-        loss = loss + 0.1 * (spine_dofs ** 2).mean()
-
-        # Scapula regularization
-        scapula_elev_indices = [27, 37]
-        scapula_elev = poses[:, scapula_elev_indices]
-        loss = loss + 0.05 * (scapula_elev ** 2).mean()
+        # Minimal regularization (simplified for better MPJPE)
+        loss = loss + 0.001 * (poses ** 2).mean()
+        loss = loss + 0.001 * (betas ** 2).mean()
 
         loss.backward()
         optimizer_all.step()
@@ -2134,7 +2104,7 @@ def main():
     skel_result = optimize_skel(
         target_joints, joint_names, device, args.num_iters,
         virtual_acromial_weight=0.0,       # 0 = acromial→humerus 직접 매핑 (20 joints)
-        shoulder_width_weight=10.0,        # Force shoulder width to match AddB acromial width
+        shoulder_width_weight=1.0,         # Mild shoulder width constraint
         use_beta_init=True,                # Initialize beta from AddB proportions
         use_dynamic_virtual_acromial=False, # Disabled when virtual_acromial_weight=0
         gender=gender,
