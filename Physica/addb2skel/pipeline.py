@@ -21,9 +21,6 @@ from .scale_estimation import estimate_subject_scale
 from .pose_optimization import optimize_poses
 from .scapula_handler import ScapulaHandler
 from .joint_definitions import build_direct_joint_mapping, ADDB_JOINTS, SKEL_JOINTS
-from .utils.geometry import convert_addb_to_skel_coords
-
-
 def convert_addb_to_skel(
     addb_joints: np.ndarray,
     gender: str = 'male',
@@ -93,8 +90,9 @@ def convert_addb_to_skel(
     if num_joints != 20:
         raise ValueError(f"Expected 20 AddB joints, got {num_joints}")
 
-    # Convert AddB coordinates to SKEL coordinate system
-    addb_joints_converted = convert_addb_to_skel_coords(addb_joints)
+    # Note: AddB and SKEL use the same coordinate system (no conversion needed)
+    # This was verified by comparing with the working compare_smpl_skel.py code
+    addb_joints_converted = addb_joints
 
     # Initialize SKEL model
     if verbose:
@@ -133,6 +131,10 @@ def convert_addb_to_skel(
         config,
         verbose=verbose,
     )
+
+    # Use optimized betas from Stage 2 (important!)
+    if 'final_betas' in pose_stats:
+        betas = pose_stats['final_betas']
 
     if verbose:
         print(f"\n  Final MPJPE: {pose_stats['mpjpe_mm']:.1f} mm")

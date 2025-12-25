@@ -1,0 +1,266 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{geometry}
+\usepackage{booktabs}
+
+\geometry{margin=1in}
+
+\title{SKEL Optimization with Shoulder Correction\\Objective Functions}
+\author{Auto-generated from code analysis}
+\date{}
+
+\begin{document}
+\maketitle
+
+%==============================================================================
+\section{Problem Formulation}
+%==============================================================================
+
+\textbf{Given:}
+\begin{itemize}
+    \item AddB target joints: $\mathbf{J}^{\text{target}} \in \mathbb{R}^{T \times N_{\text{addb}} \times 3}$ \quad ($T$ frames, $N_{\text{addb}}=20$ joints)
+    \item SKEL model: $\mathcal{M}(\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t}) \rightarrow (\mathbf{V}, \mathbf{J}^{\text{pred}})$
+    \begin{itemize}
+        \item $\boldsymbol{\beta} \in \mathbb{R}^{10}$: body shape parameters
+        \item $\boldsymbol{\theta} \in \mathbb{R}^{T \times 46}$: pose parameters (Euler angles)
+        \item $\mathbf{t} \in \mathbb{R}^{T \times 3}$: global translation
+        \item $\mathbf{V} \in \mathbb{R}^{T \times 6890 \times 3}$: mesh vertices
+        \item $\mathbf{J}^{\text{pred}} \in \mathbb{R}^{T \times 24 \times 3}$: predicted joints
+    \end{itemize}
+\end{itemize}
+
+\textbf{Objective:}
+\begin{equation}
+    \min_{\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t}} \mathcal{L}_{\text{total}}(\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t})
+\end{equation}
+
+%==============================================================================
+\section{Total Loss Function}
+%==============================================================================
+
+\begin{equation}
+\boxed{
+\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{joint}}
++ \lambda_{\text{dir}} \mathcal{L}_{\text{bone\_dir}}
++ \lambda_{\text{len}} \mathcal{L}_{\text{bone\_len}}
++ \lambda_{\text{shoulder}} \mathcal{L}_{\text{shoulder}}
++ \lambda_{\text{width}} \mathcal{L}_{\text{width}}
++ \mathcal{L}_{\text{reg}}
+}
+\end{equation}
+
+\textbf{Default weights:}
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\toprule
+Weight & Value \\
+\midrule
+$\lambda_{\text{dir}}$ & 0.3 \\
+$\lambda_{\text{len}}$ & 1.0 \\
+$\lambda_{\text{shoulder}}$ & 1.0 \\
+$\lambda_{\text{width}}$ & 0.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%==============================================================================
+\section{Individual Loss Terms}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Joint Position Loss}
+%------------------------------------------------------------------------------
+
+\begin{equation}
+\mathcal{L}_{\text{joint}} = \frac{1}{|\mathcal{M}|} \sum_{(i,j) \in \mathcal{M}} w_j \left\| \mathbf{J}^{\text{pred}}_{:,j,:} - \mathbf{J}^{\text{target}}_{:,i,:} \right\|_2^2
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathcal{M} = \{(i,j)\}$ is the joint mapping from AddB index $i$ to SKEL index $j$
+    \item $w_j$ = joint-specific weight (default 1.0, important joints = 2.0)
+\end{itemize}
+
+\textbf{Important joints} ($w=2.0$): pelvis, femur\_r, femur\_l, thorax
+
+\textbf{Note:} When shoulder correction is enabled, acromial joints are excluded from this loss.
+
+%------------------------------------------------------------------------------
+\subsection{Bone Direction Loss}
+%------------------------------------------------------------------------------
+
+\begin{equation}
+\mathcal{L}_{\text{bone\_dir}} = \frac{1}{|\mathcal{B}|} \sum_{b \in \mathcal{B}} \left( 1 - \cos(\mathbf{d}^b_{\text{pred}}, \mathbf{d}^b_{\text{target}}) \right)
+\end{equation}
+
+where:
+\begin{align}
+\mathbf{d}^b_{\text{pred}} &= \frac{\mathbf{J}^{\text{pred}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{pred}}_{:,\text{parent}_b,:}}{\left\| \mathbf{J}^{\text{pred}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{pred}}_{:,\text{parent}_b,:} \right\|_2} \\
+\mathbf{d}^b_{\text{target}} &= \frac{\mathbf{J}^{\text{target}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{target}}_{:,\text{parent}_b,:}}{\left\| \mathbf{J}^{\text{target}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{target}}_{:,\text{parent}_b,:} \right\|_2} \\
+\cos(\mathbf{a}, \mathbf{b}) &= \frac{\mathbf{a} \cdot \mathbf{b}}{\|\mathbf{a}\|_2 \|\mathbf{b}\|_2}
+\end{align}
+
+Range: $[0, 2]$, where $0$ = perfect alignment, $2$ = opposite direction
+
+%------------------------------------------------------------------------------
+\subsection{Bone Length Loss}
+%------------------------------------------------------------------------------
+
+\begin{equation}
+\mathcal{L}_{\text{bone\_len}} = \frac{1}{|\mathcal{B}|} \sum_{b \in \mathcal{B}} \left( l^b_{\text{pred}} - l^b_{\text{target}} \right)^2
+\end{equation}
+
+where:
+\begin{align}
+l^b_{\text{pred}} &= \left\| \mathbf{J}^{\text{pred}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{pred}}_{:,\text{parent}_b,:} \right\|_2 \\
+l^b_{\text{target}} &= \left\| \mathbf{J}^{\text{target}}_{:,\text{child}_b,:} - \mathbf{J}^{\text{target}}_{:,\text{parent}_b,:} \right\|_2
+\end{align}
+
+%------------------------------------------------------------------------------
+\subsection{Shoulder (Acromial) Position Loss}
+%------------------------------------------------------------------------------
+
+\textbf{Virtual Acromial Computation:}
+
+\begin{equation}
+\mathbf{a}^{\text{virtual}}_R = \frac{1}{|\mathcal{V}_R|} \sum_{v \in \mathcal{V}_R} \mathbf{V}_{:,v,:}
+\quad , \quad
+\mathbf{a}^{\text{virtual}}_L = \frac{1}{|\mathcal{V}_L|} \sum_{v \in \mathcal{V}_L} \mathbf{V}_{:,v,:}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathcal{V}_R = \{4125, 4124, 5293, 5290\}$ (right acromion vertex indices)
+    \item $\mathcal{V}_L = \{635, 636, 1830, 1829\}$ (left acromion vertex indices)
+\end{itemize}
+
+\textbf{Loss:}
+\begin{equation}
+\mathcal{L}_{\text{shoulder}} = \left\| \mathbf{a}^{\text{virtual}}_R - \mathbf{a}^{\text{target}}_R \right\|_2^2 + \left\| \mathbf{a}^{\text{virtual}}_L - \mathbf{a}^{\text{target}}_L \right\|_2^2
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathbf{a}^{\text{target}}_R = \mathbf{J}^{\text{target}}_{:,12,:}$ (AddB acromial\_r)
+    \item $\mathbf{a}^{\text{target}}_L = \mathbf{J}^{\text{target}}_{:,16,:}$ (AddB acromial\_l)
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Shoulder Width Loss}
+%------------------------------------------------------------------------------
+
+\begin{equation}
+\mathcal{L}_{\text{width}} = \left( w_{\text{skel}} - w_{\text{addb}} \right)^2
+\end{equation}
+
+where:
+\begin{align}
+w_{\text{skel}} &= \left\| \mathbf{a}^{\text{virtual}}_R - \mathbf{a}^{\text{virtual}}_L \right\|_2 \\
+w_{\text{addb}} &= \left\| \mathbf{a}^{\text{target}}_R - \mathbf{a}^{\text{target}}_L \right\|_2
+\end{align}
+
+%------------------------------------------------------------------------------
+\subsection{Regularization Loss}
+%------------------------------------------------------------------------------
+
+\begin{equation}
+\mathcal{L}_{\text{reg}} = \mathcal{L}_{\text{pose}} + \mathcal{L}_{\text{shape}} + \mathcal{L}_{\text{spine}} + \mathcal{L}_{\text{scapula}}
+\end{equation}
+
+\textbf{Components:}
+
+\begin{align}
+\mathcal{L}_{\text{pose}} &= 0.01 \cdot \frac{1}{T \cdot 46} \sum_{t,k} \theta_{t,k}^2 \\
+\mathcal{L}_{\text{shape}} &= 0.005 \cdot \frac{1}{10} \sum_{k} \beta_k^2 \\
+\mathcal{L}_{\text{spine}} &= 0.05 \cdot \frac{1}{T \cdot 9} \sum_{t} \sum_{k=17}^{25} \theta_{t,k}^2 \\
+\mathcal{L}_{\text{scapula}} &= 0.1 \cdot \frac{1}{T \cdot 2} \sum_{t} \left( \theta_{t,27}^2 + \theta_{t,37}^2 \right)
+\end{align}
+
+%==============================================================================
+\section{Pseudocode}
+%==============================================================================
+
+\begin{algorithm}[H]
+\caption{SKEL Optimization with Shoulder Correction}
+\begin{algorithmic}[1]
+\Require $\mathbf{J}^{\text{target}}$: AddB joints $[T, 20, 3]$
+\Require joint\_names: list of AddB joint names
+\Require num\_iters: optimization iterations (default: 200)
+
+\State \textbf{Initialize:}
+\State $\boldsymbol{\beta} \gets \mathbf{0}_{10}$
+\State $\boldsymbol{\theta} \gets \mathbf{0}_{T \times 46}$
+\State $\mathbf{t} \gets \mathbf{J}^{\text{target}}_{:,\text{pelvis},:]$
+
+\State optimizer $\gets$ Adam($[\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t}]$, lr=$[0.05, 0.02, 0.01]$)
+
+\State $\mathcal{M} \gets$ build\_joint\_mapping()
+\State $\mathcal{B}_{\text{dir}} \gets$ build\_bone\_pair\_mapping()
+\State $\mathcal{B}_{\text{len}} \gets$ build\_bone\_length\_pairs()
+\State $\mathbf{a}^{\text{target}}_R \gets \mathbf{J}^{\text{target}}_{:,12,:}$, \quad $\mathbf{a}^{\text{target}}_L \gets \mathbf{J}^{\text{target}}_{:,16,:}$
+
+\For{iter $= 1$ to num\_iters}
+    \State optimizer.zero\_grad()
+    \State $\mathbf{V}, \mathbf{J}^{\text{pred}} \gets \mathcal{M}(\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t})$
+
+    \State \textit{// Compute losses}
+    \State $\mathcal{L}_{\text{joint}} \gets$ Eq. (2)
+    \State $\mathcal{L}_{\text{bone\_dir}} \gets$ Eq. (3)
+    \State $\mathcal{L}_{\text{bone\_len}} \gets$ Eq. (6)
+    \State $\mathbf{a}^{\text{virtual}}_R \gets \text{mean}(\mathbf{V}_{:,\mathcal{V}_R,:})$, \quad $\mathbf{a}^{\text{virtual}}_L \gets \text{mean}(\mathbf{V}_{:,\mathcal{V}_L,:})$
+    \State $\mathcal{L}_{\text{shoulder}} \gets$ Eq. (8)
+    \State $\mathcal{L}_{\text{width}} \gets$ Eq. (9)
+    \State $\mathcal{L}_{\text{reg}} \gets$ Eq. (10)
+
+    \State $\mathcal{L}_{\text{total}} \gets \mathcal{L}_{\text{joint}} + 0.3\mathcal{L}_{\text{bone\_dir}} + 1.0\mathcal{L}_{\text{bone\_len}} + 1.0\mathcal{L}_{\text{shoulder}} + 0.5\mathcal{L}_{\text{width}} + \mathcal{L}_{\text{reg}}$
+
+    \State $\mathcal{L}_{\text{total}}$.backward()
+    \State optimizer.step()
+\EndFor
+
+\State \Return $\boldsymbol{\beta}, \boldsymbol{\theta}, \mathbf{t}$
+\end{algorithmic}
+\end{algorithm}
+
+%==============================================================================
+\section{Evaluation Metrics}
+%==============================================================================
+
+\textbf{MPJPE (Mean Per Joint Position Error):}
+\begin{equation}
+\text{MPJPE} = \frac{1000}{|\mathcal{M}|} \sum_{(i,j) \in \mathcal{M}} \left\| \mathbf{J}^{\text{pred}}_{:,j,:} - \mathbf{J}^{\text{target}}_{:,i,:} \right\|_2 \quad [\text{mm}]
+\end{equation}
+
+\textbf{Shoulder Metrics:}
+\begin{align}
+\text{Virtual Acromial Error} &= \frac{1}{2} \left( \left\| \mathbf{a}^{\text{virtual}}_R - \mathbf{a}^{\text{target}}_R \right\|_2 + \left\| \mathbf{a}^{\text{virtual}}_L - \mathbf{a}^{\text{target}}_L \right\|_2 \right) \times 1000 \quad [\text{mm}] \\
+\text{Width Error} &= \left| w_{\text{skel}} - w_{\text{addb}} \right| \times 1000 \quad [\text{mm}]
+\end{align}
+
+%==============================================================================
+\section{Joint Mapping Summary}
+%==============================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+AddB (20 joints) & SKEL (24 joints) \\
+\midrule
+ground\_pelvis & pelvis \\
+hip\_r / hip\_l & femur\_r / femur\_l \\
+walker\_knee\_r / walker\_knee\_l & tibia\_r / tibia\_l \\
+ankle\_r / ankle\_l & talus\_r / talus\_l \\
+back & thorax \\
+acromial\_r / acromial\_l & humerus\_r / humerus\_l$^*$ \\
+elbow\_r / elbow\_l & ulna\_r / ulna\_l \\
+radius\_hand\_r / radius\_hand\_l & radius\_r / radius\_l \\
+\bottomrule
+\end{tabular}
+\caption{$^*$Excluded from $\mathcal{L}_{\text{joint}}$ when shoulder correction is enabled}
+\end{table}
+
+\end{document}

@@ -257,3 +257,101 @@ def convert_addb_to_skel_coords(
     converted = addb_joints.copy()
     converted[..., 2] = -converted[..., 2]
     return converted
+
+
+def project_point_onto_line(
+    point: Union[np.ndarray, torch.Tensor],
+    line_start: Union[np.ndarray, torch.Tensor],
+    line_end: Union[np.ndarray, torch.Tensor],
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Project a point onto the line defined by line_start and line_end.
+
+    Args:
+        point: Point to project [3] or [B, 3].
+        line_start: Start of the line [3] or [B, 3].
+        line_end: End of the line [3] or [B, 3].
+
+    Returns:
+        Projected point on the line [3] or [B, 3].
+    """
+    is_numpy = isinstance(point, np.ndarray)
+
+    # Line direction
+    line_vec = line_end - line_start
+    if is_numpy:
+        line_len = np.linalg.norm(line_vec, axis=-1, keepdims=True) + 1e-8
+    else:
+        line_len = torch.norm(line_vec, dim=-1, keepdim=True) + 1e-8
+    line_dir = line_vec / line_len
+
+    # Vector from line start to point
+    to_point = point - line_start
+
+    # Project onto line direction
+    if is_numpy:
+        t = np.sum(to_point * line_dir, axis=-1, keepdims=True)
+    else:
+        t = (to_point * line_dir).sum(dim=-1, keepdim=True)
+
+    # Projected point
+    projected = line_start + t * line_dir
+
+    return projected
+
+
+def postprocess_humerus_to_arm_line(
+    skel_joints: Union[np.ndarray, torch.Tensor],
+    addb_joints: Union[np.ndarray, torch.Tensor],
+    blend_factor: float = 1.0,
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Post-process SKEL joints to move humerus onto AddB arm line.
+
+    This is a post-processing step that projects SKEL humerus joints
+    onto the AddB acromial→elbow line for better visual alignment,
+    without affecting the optimization loss.
+
+    Args:
+        skel_joints: SKEL joint positions [T, 24, 3].
+        addb_joints: AddB joint positions [T, 20, 3].
+        blend_factor: How much to move humerus toward the line (0=no change, 1=on line).
+
+    Returns:
+        Modified SKEL joints with humerus projected onto arm line.
+    """
+    is_numpy = isinstance(skel_joints, np.ndarray)
+
+    # Clone/copy to avoid modifying original
+    if is_numpy:
+        result = skel_joints.copy()
+    else:
+        result = skel_joints.clone()
+
+    # AddB joint indices
+    ADDB_ACROMIAL_R = 12
+    ADDB_ACROMIAL_L = 16
+    ADDB_ELBOW_R = 13
+    ADDB_ELBOW_L = 17
+
+    # SKEL joint indices
+    SKEL_HUMERUS_R = 15
+    SKEL_HUMERUS_L = 20
+
+    # Right arm: project humerus onto acromial→elbow line
+    addb_acr_r = addb_joints[:, ADDB_ACROMIAL_R, :]
+    addb_elbow_r = addb_joints[:, ADDB_ELBOW_R, :]
+    skel_hum_r = skel_joints[:, SKEL_HUMERUS_R, :]
+
+    projected_r = project_point_onto_line(skel_hum_r, addb_acr_r, addb_elbow_r)
+    result[:, SKEL_HUMERUS_R, :] = (1 - blend_factor) * skel_hum_r + blend_factor * projected_r
+
+    # Left arm: project humerus onto acromial→elbow line
+    addb_acr_l = addb_joints[:, ADDB_ACROMIAL_L, :]
+    addb_elbow_l = addb_joints[:, ADDB_ELBOW_L, :]
+    skel_hum_l = skel_joints[:, SKEL_HUMERUS_L, :]
+
+    projected_l = project_point_onto_line(skel_hum_l, addb_acr_l, addb_elbow_l)
+    result[:, SKEL_HUMERUS_L, :] = (1 - blend_factor) * skel_hum_l + blend_factor * projected_l
+
+    return result

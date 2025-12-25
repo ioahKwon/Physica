@@ -213,8 +213,8 @@ AUTO_JOINT_NAME_MAP_SKEL: Dict[str, str] = {
     'skull': 'head',
 
     # AddB _r arm → SKEL _r arm (직접 매핑)
-    # acromial (어깨 끝) → humerus_r (SKEL shoulder joint, more accurate than acromial_r)
-    # humerus is the actual shoulder rotation center, acromial_r is just surface vertex average
+    # acromial (어깨 끝) → humerus_r (SKEL shoulder joint, more accurate than scapula)
+    # humerus is the actual shoulder rotation center
     'acromial_r': 'humerus_r',
     'shoulder_r': 'scapula_r',
     'elbow_r': 'ulna_r',

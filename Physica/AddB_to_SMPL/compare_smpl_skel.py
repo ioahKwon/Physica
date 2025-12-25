@@ -1296,6 +1296,8 @@ def optimize_smpl(target_joints: np.ndarray, addb_joint_names: List[str],
 
 # SKEL ↔ AddB bone pair mapping for bone length loss
 # Format: (skel_parent_name, skel_child_name, addb_parent_name, addb_child_name)
+# NOTE: Joint mapping uses acromial → scapula, bone length uses scapula→ulna
+#       to match acromial→elbow distance
 SKEL_ADDB_BONE_LENGTH_PAIRS = [
     # Legs
     ('pelvis', 'femur_r', 'ground_pelvis', 'hip_r'),       # pelvis → hip_r
@@ -1306,12 +1308,12 @@ SKEL_ADDB_BONE_LENGTH_PAIRS = [
     ('tibia_l', 'talus_l', 'walker_knee_l', 'ankle_l'),    # tibia L
     ('talus_r', 'calcn_r', 'ankle_r', 'subtalar_r'),       # ankle → subtalar R
     ('talus_l', 'calcn_l', 'ankle_l', 'subtalar_l'),       # ankle → subtalar L
-    # Shoulder width (thorax → humerus: acromial이 humerus에 매핑됨)
-    ('thorax', 'humerus_r', 'back', 'acromial_r'),         # 등 → 어깨-팔 연결점 R
-    ('thorax', 'humerus_l', 'back', 'acromial_l'),         # 등 → 어깨-팔 연결점 L
-    # Upper arms (humerus → ulna)
-    ('humerus_r', 'ulna_r', 'acromial_r', 'elbow_r'),      # 어깨 → 팔꿈치 (상완) R
-    ('humerus_l', 'ulna_l', 'acromial_l', 'elbow_l'),      # 어깨 → 팔꿈치 (상완) L
+    # Shoulder width (thorax → scapula)
+    ('thorax', 'scapula_r', 'back', 'acromial_r'),         # 등 → 어깨 (scapula) R
+    ('thorax', 'scapula_l', 'back', 'acromial_l'),         # 등 → 어깨 (scapula) L
+    # Upper arms (scapula → ulna to match acromial → elbow)
+    ('scapula_r', 'ulna_r', 'acromial_r', 'elbow_r'),      # 어깨(scapula) → 팔꿈치 R
+    ('scapula_l', 'ulna_l', 'acromial_l', 'elbow_l'),      # 어깨(scapula) → 팔꿈치 L
     # Forearms
     ('ulna_r', 'hand_r', 'elbow_r', 'radius_hand_r'),      # forearm R (ulna → hand)
     ('ulna_l', 'hand_l', 'elbow_l', 'radius_hand_l'),      # forearm L
@@ -1858,11 +1860,13 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
     bone_dir_weight = 0.3   # Bone direction loss
     bone_length_weight = 1.0  # Bone length loss
 
-    # Per-joint weights for important joints (pelvis, hips, spine, shoulders)
+    # Per-joint weights for important joints (pelvis, hips, spine, shoulders, arms)
     joint_weights = torch.ones(len(skel_indices), device=device)
     important_skel_joints = ['pelvis', 'femur_r', 'femur_l']  # 2.0x weight
     spine_joints = ['lumbar_body', 'thorax']  # 5.0x weight for spine alignment
-    shoulder_joints = ['humerus_r', 'humerus_l']  # Higher weight for shoulder fitting
+    shoulder_joints = ['scapula_r', 'scapula_l']  # Higher weight for shoulder fitting (acromial→scapula)
+    elbow_joints = ['ulna_r', 'ulna_l']  # Elbow matching (elbow→ulna)
+    hand_joints = ['hand_r', 'hand_l']  # Hand matching (radius_hand→hand)
     for i, skel_idx in enumerate(skel_indices):
         # Use 24-joint names (no acromial extension)
         joint_name = SKEL_JOINT_NAMES[skel_idx].lower()
@@ -1871,7 +1875,13 @@ def optimize_skel(target_joints: np.ndarray, addb_joint_names: List[str],
         elif joint_name in spine_joints:
             joint_weights[i] = 5.0  # spine 정렬을 위해 높은 가중치
         elif joint_name in shoulder_joints:
-            # Higher weight for humerus (mapped from AddB acromial)
+            # Higher weight for scapula (mapped from AddB acromial)
+            joint_weights[i] = 10.0
+        elif joint_name in elbow_joints:
+            # Higher weight for elbow (mapped from AddB elbow)
+            joint_weights[i] = 10.0
+        elif joint_name in hand_joints:
+            # Higher weight for hand (mapped from AddB radius_hand)
             joint_weights[i] = 10.0
 
     # ==========================================================================

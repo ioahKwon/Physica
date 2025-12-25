@@ -153,6 +153,66 @@ class ScapulaHandler:
 
         return (2 - cos_r - cos_l).mean()
 
+    def compute_humerus_on_arm_line_loss(
+        self,
+        skel_joints: torch.Tensor,
+        addb_joints: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute loss to encourage SKEL humerus to align with AddB arm direction.
+
+        Instead of forcing exact point-to-line distance (too aggressive), this:
+        1. Computes AddB arm direction (acromial → elbow)
+        2. Projects SKEL humerus offset from AddB acromial onto perpendicular plane
+        3. Penalizes deviation perpendicular to the arm direction
+
+        This allows humerus to move along the arm direction but penalizes
+        lateral offset (which causes narrow shoulders).
+
+        Args:
+            skel_joints: SKEL joint positions [B, 24, 3].
+            addb_joints: AddB joint positions [B, 20, 3].
+
+        Returns:
+            Loss value (scalar) - perpendicular deviation from arm direction.
+        """
+        # Get AddB arm line endpoints
+        addb_acr_r = addb_joints[:, ADDB_ACROMIAL_R_IDX, :]  # [B, 3]
+        addb_acr_l = addb_joints[:, ADDB_ACROMIAL_L_IDX, :]
+        addb_elbow_r = addb_joints[:, 13, :]  # elbow_r
+        addb_elbow_l = addb_joints[:, 17, :]  # elbow_l
+
+        # Get SKEL humerus positions
+        skel_hum_r = skel_joints[:, SKEL_HUMERUS_R_IDX, :]
+        skel_hum_l = skel_joints[:, SKEL_HUMERUS_L_IDX, :]
+
+        def perpendicular_deviation(point, line_start, line_end):
+            """Compute perpendicular distance from point to infinite line."""
+            # Line direction (normalized)
+            line_vec = line_end - line_start
+            line_len = torch.norm(line_vec, dim=-1, keepdim=True) + 1e-8
+            line_dir = line_vec / line_len
+
+            # Vector from line start to point
+            to_point = point - line_start
+
+            # Project onto line direction
+            parallel_component = (to_point * line_dir).sum(dim=-1, keepdim=True) * line_dir
+
+            # Perpendicular component
+            perp_component = to_point - parallel_component
+
+            # Perpendicular distance
+            perp_dist = torch.norm(perp_component, dim=-1)
+
+            return perp_dist
+
+        # Compute perpendicular deviations
+        dev_r = perpendicular_deviation(skel_hum_r, addb_acr_r, addb_elbow_r)
+        dev_l = perpendicular_deviation(skel_hum_l, addb_acr_l, addb_elbow_l)
+
+        return (dev_r + dev_l).mean()
+
     def compute_scapula_regularization(
         self,
         poses: torch.Tensor,
@@ -314,10 +374,14 @@ def compute_shoulder_losses(
         skel_vertices, addb_joints
     )
 
-    # Humerus alignment loss
+    # Humerus alignment loss (direction matching)
     losses['humerus_align'] = 0.5 * scapula_handler.compute_humerus_alignment_loss(
         skel_joints, addb_joints
     )
+
+    # Humerus alignment with arm direction (perpendicular deviation penalty)
+    # DISABLED during optimization - use post-processing instead for better MPJPE
+    losses['humerus_on_line'] = torch.tensor(0.0, device=skel_joints.device)
 
     # Scapula regularization
     losses['scapula_reg'] = config.weight_scapula_reg * scapula_handler.compute_scapula_regularization(

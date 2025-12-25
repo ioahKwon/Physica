@@ -67,12 +67,20 @@ class SKELInterface:
             gender=self.gender,
         ).to(self.device)
 
-        # Get faces for mesh export
-        self.faces = self.model.faces.astype(np.int32)
+        # Set model to evaluation mode
+        self.model.eval()
+
+        # Get faces for mesh export (SKEL uses 'skin_f' for skin mesh faces)
+        if hasattr(self.model, 'skin_f'):
+            self.faces = self.model.skin_f.cpu().numpy().astype(np.int32)
+        elif hasattr(self.model, 'faces'):
+            self.faces = self.model.faces.astype(np.int32) if isinstance(self.model.faces, np.ndarray) else self.model.faces.cpu().numpy().astype(np.int32)
+        else:
+            self.faces = None
 
         # Get skeleton faces if available
         if hasattr(self.model, 'skel_f'):
-            self.skel_faces = self.model.skel_f.astype(np.int32)
+            self.skel_faces = self.model.skel_f.cpu().numpy().astype(np.int32)
         else:
             self.skel_faces = None
 
@@ -83,8 +91,9 @@ class SKELInterface:
             # Default SKEL kinematic tree
             self.parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 12, 14, 15, 16, 17, 12, 19, 20, 21, 22]
 
-        # Number of vertices
-        self.num_vertices = self.model.v_template.shape[0]
+        # Number of vertices (SKEL has 6890 vertices like SMPL)
+        from .config import SKEL_NUM_VERTICES
+        self.num_vertices = SKEL_NUM_VERTICES
 
     def forward(
         self,
@@ -121,12 +130,14 @@ class SKELInterface:
         if betas.shape[0] == 1 and B > 1:
             betas = betas.expand(B, -1)
 
-        # Forward through SKEL
+        # Forward through SKEL (uses 'skelmesh' parameter, not 'return_skel')
         output = self.model(
-            betas=betas,
             poses=poses,
+            betas=betas,
             trans=trans,
-            return_skel=return_skeleton,
+            poses_type='skel',
+            skelmesh=return_skeleton,
+            pose_dep_bs=True,
         )
 
         vertices = output.skin_verts
@@ -232,19 +243,32 @@ class SKELInterface:
     def get_shoulder_width(
         self,
         joints: torch.Tensor,
+        use_scapula: bool = True,
     ) -> torch.Tensor:
         """
-        Compute shoulder width from humerus joints.
+        Compute shoulder width from scapula or humerus joints.
+
+        Note: Working code uses scapula (not humerus) for shoulder width matching
+        to AddB acromial-to-acromial width. Scapula is more lateral (closer to acromial).
 
         Args:
             joints: Joint positions [B, 24, 3].
+            use_scapula: If True, use scapula joints (default, matches working code).
+                         If False, use humerus joints.
 
         Returns:
             Shoulder width [B] in meters.
         """
-        humerus_r = joints[:, SKEL_JOINT_TO_IDX['humerus_r'], :]
-        humerus_l = joints[:, SKEL_JOINT_TO_IDX['humerus_l'], :]
-        return torch.norm(humerus_r - humerus_l, dim=-1)
+        if use_scapula:
+            # Use scapula for shoulder width (closer to acromial surface landmark)
+            scapula_r = joints[:, SKEL_JOINT_TO_IDX['scapula_r'], :]
+            scapula_l = joints[:, SKEL_JOINT_TO_IDX['scapula_l'], :]
+            return torch.norm(scapula_r - scapula_l, dim=-1)
+        else:
+            # Use humerus (glenohumeral center)
+            humerus_r = joints[:, SKEL_JOINT_TO_IDX['humerus_r'], :]
+            humerus_l = joints[:, SKEL_JOINT_TO_IDX['humerus_l'], :]
+            return torch.norm(humerus_r - humerus_l, dim=-1)
 
     def get_height(
         self,

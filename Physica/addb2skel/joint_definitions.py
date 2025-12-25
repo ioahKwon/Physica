@@ -21,28 +21,30 @@ from typing import Dict, List, Tuple, Optional
 # =============================================================================
 # AddBiomechanics Joint Definitions (20 joints)
 # =============================================================================
+# NOTE: These are the ACTUAL joint names from b3d files (e.g., Subject11.b3d)
+# The names are nimblephysics-style, not OpenSim-style
 
 ADDB_JOINTS = [
-    'pelvis',        # 0
-    'femur_r',       # 1
-    'tibia_r',       # 2
-    'talus_r',       # 3
-    'calcn_r',       # 4  (rigid body frame / hindfoot segment ref)
-    'toes_r',        # 5
-    'femur_l',       # 6
-    'tibia_l',       # 7
-    'talus_l',       # 8
-    'calcn_l',       # 9  (rigid body frame)
-    'toes_l',        # 10
-    'torso',         # 11 (simplified trunk)
-    'acromial_r',    # 12 (surface landmark, NOT glenohumeral)
-    'elbow_r',       # 13
-    'radius_r',      # 14
-    'hand_r',        # 15 (rigid body frame)
-    'acromial_l',    # 16 (surface landmark, NOT glenohumeral)
-    'elbow_l',       # 17
-    'radius_l',      # 18
-    'hand_l',        # 19 (rigid body frame)
+    'ground_pelvis', # 0  (pelvis root)
+    'hip_r',         # 1  (right hip / femur_r)
+    'walker_knee_r', # 2  (right knee / tibia_r)
+    'ankle_r',       # 3  (right ankle / talus_r)
+    'subtalar_r',    # 4  (right hindfoot / calcn_r)
+    'mtp_r',         # 5  (right toe / toes_r)
+    'hip_l',         # 6  (left hip / femur_l)
+    'walker_knee_l', # 7  (left knee / tibia_l)
+    'ankle_l',       # 8  (left ankle / talus_l)
+    'subtalar_l',    # 9  (left hindfoot / calcn_l)
+    'mtp_l',         # 10 (left toe / toes_l)
+    'back',          # 11 (spine / lumbar)
+    'acromial_r',    # 12 (right shoulder surface landmark)
+    'elbow_r',       # 13 (right elbow)
+    'radioulnar_r',  # 14 (right wrist / radius_r)
+    'radius_hand_r', # 15 (right hand frame)
+    'acromial_l',    # 16 (left shoulder surface landmark)
+    'elbow_l',       # 17 (left elbow)
+    'radioulnar_l',  # 18 (left wrist / radius_l)
+    'radius_hand_l', # 19 (left hand frame)
 ]
 
 ADDB_JOINT_TO_IDX = {name: idx for idx, name in enumerate(ADDB_JOINTS)}
@@ -108,100 +110,103 @@ class JointMapping:
 # =============================================================================
 # AddB → SKEL Joint Correspondence
 # =============================================================================
+# Uses actual nimblephysics joint names from b3d files
 
 ADDB_TO_SKEL_MAPPING: Dict[str, JointMapping] = {
-    # Lower body - Direct mappings
-    'pelvis': JointMapping(
-        'pelvis', ['pelvis'], MappingType.DIRECT,
+    # Pelvis (root)
+    'ground_pelvis': JointMapping(
+        'ground_pelvis', ['pelvis'], MappingType.DIRECT,
         "Root joint - direct 1:1", use_in_loss=True
     ),
-    'femur_r': JointMapping(
-        'femur_r', ['femur_r'], MappingType.DIRECT,
-        "Right hip - direct 1:1", use_in_loss=True
-    ),
-    'femur_l': JointMapping(
-        'femur_l', ['femur_l'], MappingType.DIRECT,
-        "Left hip - direct 1:1", use_in_loss=True
-    ),
-    'tibia_r': JointMapping(
-        'tibia_r', ['tibia_r'], MappingType.DIRECT,
-        "Right knee - direct 1:1", use_in_loss=True
-    ),
-    'tibia_l': JointMapping(
-        'tibia_l', ['tibia_l'], MappingType.DIRECT,
-        "Left knee - direct 1:1", use_in_loss=True
-    ),
-    'talus_r': JointMapping(
-        'talus_r', ['talus_r'], MappingType.DIRECT,
-        "Right ankle - direct 1:1", use_in_loss=True
-    ),
-    'talus_l': JointMapping(
-        'talus_l', ['talus_l'], MappingType.DIRECT,
-        "Left ankle - direct 1:1", use_in_loss=True
-    ),
-    'toes_r': JointMapping(
-        'toes_r', ['toes_r'], MappingType.DIRECT,
-        "Right toes - direct 1:1", use_in_loss=True
-    ),
-    'toes_l': JointMapping(
-        'toes_l', ['toes_l'], MappingType.DIRECT,
-        "Left toes - direct 1:1", use_in_loss=True
-    ),
 
-    # Segment frames - less reliable for loss
-    'calcn_r': JointMapping(
-        'calcn_r', ['calcn_r'], MappingType.SEGMENT,
+    # Right leg
+    'hip_r': JointMapping(
+        'hip_r', ['femur_r'], MappingType.DIRECT,
+        "Right hip → femur_r", use_in_loss=True
+    ),
+    'walker_knee_r': JointMapping(
+        'walker_knee_r', ['tibia_r'], MappingType.DIRECT,
+        "Right knee → tibia_r", use_in_loss=True
+    ),
+    'ankle_r': JointMapping(
+        'ankle_r', ['talus_r'], MappingType.DIRECT,
+        "Right ankle → talus_r", use_in_loss=True
+    ),
+    'subtalar_r': JointMapping(
+        'subtalar_r', ['calcn_r'], MappingType.SEGMENT,
         "Right hindfoot segment frame", use_in_loss=False
     ),
-    'calcn_l': JointMapping(
-        'calcn_l', ['calcn_l'], MappingType.SEGMENT,
+    'mtp_r': JointMapping(
+        'mtp_r', ['toes_r'], MappingType.DIRECT,
+        "Right toe → toes_r", use_in_loss=True
+    ),
+
+    # Left leg
+    'hip_l': JointMapping(
+        'hip_l', ['femur_l'], MappingType.DIRECT,
+        "Left hip → femur_l", use_in_loss=True
+    ),
+    'walker_knee_l': JointMapping(
+        'walker_knee_l', ['tibia_l'], MappingType.DIRECT,
+        "Left knee → tibia_l", use_in_loss=True
+    ),
+    'ankle_l': JointMapping(
+        'ankle_l', ['talus_l'], MappingType.DIRECT,
+        "Left ankle → talus_l", use_in_loss=True
+    ),
+    'subtalar_l': JointMapping(
+        'subtalar_l', ['calcn_l'], MappingType.SEGMENT,
         "Left hindfoot segment frame", use_in_loss=False
     ),
-
-    # Spine - Approximate mapping
-    'torso': JointMapping(
-        'torso', ['lumbar', 'thorax'], MappingType.APPROXIMATE,
-        "Torso → lumbar+thorax average", use_in_loss=True
+    'mtp_l': JointMapping(
+        'mtp_l', ['toes_l'], MappingType.DIRECT,
+        "Left toe → toes_l", use_in_loss=True
     ),
 
-    # Shoulder/Scapula - PROXY mappings (most complex)
+    # Spine - back → lumbar (per working compare_smpl_skel.py: back → lumbar_body)
+    'back': JointMapping(
+        'back', ['lumbar'], MappingType.DIRECT,
+        "Back → lumbar for optimization", use_in_loss=True
+    ),
+
+    # Right arm
+    # Acromial → scapula (not humerus) - scapula is more lateral, closer to surface
+    # Note: humerus (glenohumeral) is ~30-40mm medial to acromial, causing narrow shoulders
     'acromial_r': JointMapping(
-        'acromial_r', ['scapula_r', 'humerus_r'], MappingType.PROXY,
-        "Right acromial landmark → virtual acromial on scapula/humerus",
+        'acromial_r', ['scapula_r'], MappingType.DIRECT,
+        "Right acromial → scapula (more lateral than humerus)",
         use_in_loss=True
     ),
-    'acromial_l': JointMapping(
-        'acromial_l', ['scapula_l', 'humerus_l'], MappingType.PROXY,
-        "Left acromial landmark → virtual acromial on scapula/humerus",
-        use_in_loss=True
-    ),
-
-    # Upper limb - Direct mappings with naming difference
     'elbow_r': JointMapping(
         'elbow_r', ['ulna_r'], MappingType.DIRECT,
-        "Right elbow (AddB) → ulna_r (SKEL elbow)", use_in_loss=True
+        "Right elbow → ulna_r", use_in_loss=True
+    ),
+    'radioulnar_r': JointMapping(
+        'radioulnar_r', ['radius_r'], MappingType.DIRECT,
+        "Right wrist → radius_r", use_in_loss=True
+    ),
+    'radius_hand_r': JointMapping(
+        'radius_hand_r', ['hand_r'], MappingType.DIRECT,
+        "Right hand → hand_r", use_in_loss=True
+    ),
+
+    # Left arm
+    'acromial_l': JointMapping(
+        'acromial_l', ['scapula_l'], MappingType.DIRECT,
+        "Left acromial → scapula (more lateral than humerus)",
+        use_in_loss=True
     ),
     'elbow_l': JointMapping(
         'elbow_l', ['ulna_l'], MappingType.DIRECT,
-        "Left elbow (AddB) → ulna_l (SKEL elbow)", use_in_loss=True
+        "Left elbow → ulna_l", use_in_loss=True
     ),
-    'radius_r': JointMapping(
-        'radius_r', ['hand_r'], MappingType.DIRECT,
-        "Right radius (AddB wrist-ish) → hand_r (SKEL wrist)", use_in_loss=True
+    'radioulnar_l': JointMapping(
+        'radioulnar_l', ['radius_l'], MappingType.DIRECT,
+        "Left wrist → radius_l", use_in_loss=True
     ),
-    'radius_l': JointMapping(
-        'radius_l', ['hand_l'], MappingType.DIRECT,
-        "Left radius (AddB wrist-ish) → hand_l (SKEL wrist)", use_in_loss=True
-    ),
-
-    # Hand segment frames
-    'hand_r': JointMapping(
-        'hand_r', ['hand_r'], MappingType.SEGMENT,
-        "Right hand segment frame", use_in_loss=False
-    ),
-    'hand_l': JointMapping(
-        'hand_l', ['hand_l'], MappingType.SEGMENT,
-        "Left hand segment frame", use_in_loss=False
+    'radius_hand_l': JointMapping(
+        'radius_hand_l', ['hand_l'], MappingType.DIRECT,
+        "Left hand → hand_l", use_in_loss=True
     ),
 }
 
@@ -262,21 +267,22 @@ def build_all_joint_mapping(
 # =============================================================================
 # Bone Pair Definitions
 # =============================================================================
+# Uses actual nimblephysics joint names from b3d files
 
 # AddB bone pairs for direction/length loss
 ADDB_BONE_PAIRS = [
-    ('pelvis', 'femur_r'),
-    ('pelvis', 'femur_l'),
-    ('femur_r', 'tibia_r'),
-    ('femur_l', 'tibia_l'),
-    ('tibia_r', 'talus_r'),
-    ('tibia_l', 'talus_l'),
-    ('talus_r', 'toes_r'),
-    ('talus_l', 'toes_l'),
-    ('acromial_r', 'elbow_r'),   # Upper arm
-    ('acromial_l', 'elbow_l'),
-    ('elbow_r', 'radius_r'),     # Forearm
-    ('elbow_l', 'radius_l'),
+    ('ground_pelvis', 'hip_r'),        # Pelvis to right hip
+    ('ground_pelvis', 'hip_l'),        # Pelvis to left hip
+    ('hip_r', 'walker_knee_r'),        # Right thigh
+    ('hip_l', 'walker_knee_l'),        # Left thigh
+    ('walker_knee_r', 'ankle_r'),      # Right shin
+    ('walker_knee_l', 'ankle_l'),      # Left shin
+    ('ankle_r', 'mtp_r'),              # Right foot
+    ('ankle_l', 'mtp_l'),              # Left foot
+    ('acromial_r', 'elbow_r'),         # Right upper arm
+    ('acromial_l', 'elbow_l'),         # Left upper arm
+    ('elbow_r', 'radioulnar_r'),       # Right forearm
+    ('elbow_l', 'radioulnar_l'),       # Left forearm
 ]
 
 # Corresponding SKEL bone pairs
@@ -289,22 +295,22 @@ SKEL_BONE_PAIRS = [
     ('tibia_l', 'talus_l'),
     ('talus_r', 'toes_r'),
     ('talus_l', 'toes_l'),
-    ('humerus_r', 'ulna_r'),     # Upper arm (from glenohumeral)
+    ('humerus_r', 'ulna_r'),           # Upper arm (from glenohumeral)
     ('humerus_l', 'ulna_l'),
-    ('ulna_r', 'hand_r'),        # Forearm
-    ('ulna_l', 'hand_l'),
+    ('ulna_r', 'radius_r'),             # Forearm
+    ('ulna_l', 'radius_l'),
 ]
 
 # Reliable bones for scale estimation (not affected by scapula uncertainty)
 RELIABLE_BONE_PAIRS_ADDB = [
-    ('pelvis', 'femur_r'),
-    ('pelvis', 'femur_l'),
-    ('femur_r', 'tibia_r'),
-    ('femur_l', 'tibia_l'),
-    ('tibia_r', 'talus_r'),
-    ('tibia_l', 'talus_l'),
-    ('elbow_r', 'radius_r'),
-    ('elbow_l', 'radius_l'),
+    ('ground_pelvis', 'hip_r'),
+    ('ground_pelvis', 'hip_l'),
+    ('hip_r', 'walker_knee_r'),
+    ('hip_l', 'walker_knee_l'),
+    ('walker_knee_r', 'ankle_r'),
+    ('walker_knee_l', 'ankle_l'),
+    ('elbow_r', 'radioulnar_r'),
+    ('elbow_l', 'radioulnar_l'),
 ]
 
 RELIABLE_BONE_PAIRS_SKEL = [
@@ -314,8 +320,8 @@ RELIABLE_BONE_PAIRS_SKEL = [
     ('femur_l', 'tibia_l'),
     ('tibia_r', 'talus_r'),
     ('tibia_l', 'talus_l'),
-    ('ulna_r', 'hand_r'),
-    ('ulna_l', 'hand_l'),
+    ('ulna_r', 'radius_r'),
+    ('ulna_l', 'radius_l'),
 ]
 
 

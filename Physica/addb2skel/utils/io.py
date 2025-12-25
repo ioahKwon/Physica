@@ -11,6 +11,7 @@ def load_b3d(
     b3d_path: str,
     num_frames: Optional[int] = None,
     start_frame: int = 0,
+    processing_pass: int = 0,
 ) -> Tuple[np.ndarray, List[str], Dict[str, Any]]:
     """
     Load AddBiomechanics .b3d file.
@@ -19,6 +20,7 @@ def load_b3d(
         b3d_path: Path to .b3d file.
         num_frames: Number of frames to load. None for all.
         start_frame: Starting frame index.
+        processing_pass: Processing pass index (0 for kinematics, 1 for dynamics).
 
     Returns:
         joints: Joint positions [T, N_joints, 3] in meters.
@@ -39,26 +41,55 @@ def load_b3d(
     # Get skeleton
     skel = subject.readSkel(0, ignoreGeometry=True)
 
-    # Get trial
+    # Determine frame range
+    trial_length = subject.getTrialLength(0)
+    end_frame = start_frame + num_frames if num_frames else trial_length
+    end_frame = min(end_frame, trial_length)
+    frames_to_read = end_frame - start_frame
+
+    # Get trial frames
     trial = subject.readFrames(
         trial=0,
         startFrame=start_frame,
-        numFramesToRead=num_frames if num_frames else subject.getTrialLength(0) - start_frame,
+        numFramesToRead=frames_to_read,
     )
 
-    # Extract joint positions
     T = len(trial)
+
+    # Get joint names from skeleton using correct nimblephysics API
+    # Build mapping from joint centers to joint names
+    pp_idx = min(processing_pass, len(trial[0].processingPasses) - 1)
+    pp = trial[0].processingPasses[pp_idx]
+
+    # Set skeleton positions
+    pos = np.asarray(pp.pos, dtype=np.float32)
+    if pos.size == skel.getNumDofs():
+        skel.setPositions(pos)
+
+    # Get world joint positions and names
+    world_joints = []
+    for i in range(skel.getNumJoints()):
+        joint = skel.getJoint(i)
+        world = joint.getChildBodyNode().getWorldTransform().translation()
+        joint_name = joint.getName()
+        world_joints.append((joint_name, world))
+
+    # Use jointCenters from processing pass and match to joint names
+    joint_centers_first = np.asarray(pp.jointCenters, dtype=np.float32).reshape(-1, 3)
+    num_joints = joint_centers_first.shape[0]
+
     joint_names = []
-    for i, joint in enumerate(skel.getJoints()):
-        joint_names.append(joint.getName())
+    for center in joint_centers_first:
+        dists = [np.linalg.norm(center - w) for _, w in world_joints]
+        best = int(np.argmin(dists))
+        joint_names.append(world_joints[best][0])
 
-    num_joints = len(joint_names)
+    # Extract joint positions for all frames using jointCenters
     joints = np.zeros((T, num_joints, 3))
-
     for t, frame in enumerate(trial):
-        skel.setPositions(frame.pos)
-        for i, joint in enumerate(skel.getJoints()):
-            joints[t, i] = joint.getWorldTransform().translation()
+        pp = frame.processingPasses[pp_idx]
+        joint_centers = np.asarray(pp.jointCenters, dtype=np.float32).reshape(-1, 3)
+        joints[t] = joint_centers
 
     # Get subject info
     metadata = {

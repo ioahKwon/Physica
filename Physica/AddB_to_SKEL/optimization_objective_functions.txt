@@ -1,0 +1,310 @@
+================================================================================
+SKEL Optimization with Shoulder Correction - Objective Functions
+================================================================================
+
+Author: Auto-generated from code analysis
+Date: 2024
+Source: optimize_with_shoulder.py, shoulder_correction.py, compare_smpl_skel.py
+
+================================================================================
+1. PROBLEM FORMULATION
+================================================================================
+
+Given:
+- AddB target joints: J_target in R^{T x N_addb x 3}  (T frames, N_addb=20 joints)
+- SKEL model: M(beta, theta, t) -> (V, J_pred)
+  - beta in R^{10}: body shape parameters
+  - theta in R^{T x 46}: pose parameters (Euler angles)
+  - t in R^{T x 3}: global translation
+  - V in R^{T x 6890 x 3}: mesh vertices
+  - J_pred in R^{T x 24 x 3}: predicted joints
+
+Objective:
+  min_{beta, theta, t}  L_total(beta, theta, t)
+
+
+================================================================================
+2. TOTAL LOSS FUNCTION
+================================================================================
+
+L_total = L_joint
+        + lambda_bone_dir * L_bone_dir
+        + lambda_bone_len * L_bone_len
+        + lambda_shoulder * L_shoulder
+        + lambda_width * L_width
+        + lambda_reg * L_reg
+
+Default weights:
+  lambda_bone_dir = 0.3
+  lambda_bone_len = 1.0
+  lambda_shoulder = 1.0
+  lambda_width = 0.5
+
+
+================================================================================
+3. INDIVIDUAL LOSS TERMS
+================================================================================
+
+------------------------------------------------------------------------------
+3.1 Joint Position Loss (L_joint)
+------------------------------------------------------------------------------
+
+L_joint = (1/|M|) * sum_{(i,j) in M} w_j * ||J_pred[:,j,:] - J_target[:,i,:]||^2
+
+Where:
+- M = {(i,j)} is the joint mapping from AddB index i to SKEL index j
+- w_j = joint-specific weight (default 1.0, important joints like pelvis=2.0)
+- ||.|| = L2 norm
+
+Important joints (w=2.0): pelvis, femur_r, femur_l, thorax
+
+Note: When shoulder correction is enabled, acromial joints are excluded from
+      this loss to avoid conflict with L_shoulder.
+
+
+------------------------------------------------------------------------------
+3.2 Bone Direction Loss (L_bone_dir)
+------------------------------------------------------------------------------
+
+L_bone_dir = (1/|B|) * sum_{b in B} (1 - cos(d_pred^b, d_target^b))
+
+Where:
+- B = set of matched bone pairs
+- d_pred^b = normalize(J_pred[:,child_b,:] - J_pred[:,parent_b,:])
+- d_target^b = normalize(J_target[:,child_b,:] - J_target[:,parent_b,:])
+- cos(a,b) = (a . b) / (||a|| * ||b||)  (cosine similarity)
+
+Range: [0, 2], where 0 = perfect alignment, 2 = opposite direction
+
+
+------------------------------------------------------------------------------
+3.3 Bone Length Loss (L_bone_len)
+------------------------------------------------------------------------------
+
+L_bone_len = (1/|B|) * sum_{b in B} (l_pred^b - l_target^b)^2
+
+Where:
+- l_pred^b = ||J_pred[:,child_b,:] - J_pred[:,parent_b,:]||  (predicted bone length)
+- l_target^b = ||J_target[:,child_b,:] - J_target[:,parent_b,:]||  (target bone length)
+
+
+------------------------------------------------------------------------------
+3.4 Shoulder (Acromial) Position Loss (L_shoulder)
+------------------------------------------------------------------------------
+
+Virtual Acromial Computation:
+  acr_virtual_R = (1/|V_R|) * sum_{v in V_R} V[:,v,:]
+  acr_virtual_L = (1/|V_L|) * sum_{v in V_L} V[:,v,:]
+
+Where:
+- V_R = {4125, 4124, 5293, 5290}  (right acromion vertex indices)
+- V_L = {635, 636, 1830, 1829}    (left acromion vertex indices)
+- V[:,v,:] = mesh vertex positions
+
+Loss:
+  L_shoulder = ||acr_virtual_R - acr_target_R||^2 + ||acr_virtual_L - acr_target_L||^2
+
+Where:
+- acr_target_R = J_target[:,12,:]  (AddB acromial_r joint)
+- acr_target_L = J_target[:,16,:]  (AddB acromial_l joint)
+
+
+------------------------------------------------------------------------------
+3.5 Shoulder Width Loss (L_width)
+------------------------------------------------------------------------------
+
+L_width = (w_skel - w_addb)^2
+
+Where:
+- w_skel = ||acr_virtual_R - acr_virtual_L||  (SKEL shoulder width from vertices)
+- w_addb = ||acr_target_R - acr_target_L||    (AddB shoulder width)
+
+
+------------------------------------------------------------------------------
+3.6 Regularization Loss (L_reg)
+------------------------------------------------------------------------------
+
+L_reg = L_pose + L_shape + L_spine + L_scapula
+
+Components:
+
+1) Pose regularization:
+   L_pose = 0.01 * mean(theta^2)
+
+2) Shape regularization:
+   L_shape = 0.005 * mean(beta^2)
+
+3) Spine regularization (DOF indices 17-25):
+   L_spine = 0.05 * mean(theta[:,17:26]^2)
+
+4) Scapula elevation regularization (DOF indices 27, 37):
+   L_scapula = 0.1 * mean(theta[:,[27,37]]^2)
+
+
+================================================================================
+4. PSEUDOCODE
+================================================================================
+
+```
+Algorithm: SKEL Optimization with Shoulder Correction
+
+Input:
+  - J_target: AddB joint positions [T, 20, 3]
+  - joint_names: list of AddB joint names
+  - num_iters: number of optimization iterations (default: 200)
+  - weights: {bone_dir: 0.3, bone_len: 1.0, shoulder: 1.0, width: 0.5}
+
+Output:
+  - beta*: optimized shape parameters
+  - theta*: optimized pose parameters
+  - t*: optimized translation
+
+Initialization:
+  beta <- zeros(10)
+  theta <- zeros(T, 46)
+  t <- J_target[:, pelvis_idx, :]  # Initialize from target pelvis
+
+  optimizer <- Adam([
+    {params: beta, lr: 0.05},
+    {params: theta, lr: 0.02},
+    {params: t, lr: 0.01}
+  ])
+
+  # Build joint/bone mappings
+  M <- build_joint_mapping(AddB_names, SKEL_names)
+  B_dir <- build_bone_pair_mapping(AddB_names, SKEL_names)
+  B_len <- build_bone_length_pairs(AddB_names, SKEL_names)
+
+  # Get AddB acromial positions
+  acr_R <- J_target[:, acromial_r_idx, :]
+  acr_L <- J_target[:, acromial_l_idx, :]
+
+For iter = 1 to num_iters:
+
+  optimizer.zero_grad()
+
+  # Forward pass through SKEL model
+  V, J_pred <- SKEL_model(beta, theta, t)
+
+  # ===== Compute Loss Terms =====
+
+  # 1. Joint Position Loss
+  L_joint <- 0
+  for (i, j) in M:
+    if (i != acromial_r and i != acromial_l):  # exclude acromial
+      L_joint += w[j] * ||J_pred[:,j,:] - J_target[:,i,:]||^2
+  L_joint <- L_joint / |M_filtered|
+
+  # 2. Bone Direction Loss
+  L_bone_dir <- 0
+  for ((t_p, t_c), (p_p, p_c)) in B_dir:
+    d_target <- normalize(J_target[:,t_c,:] - J_target[:,t_p,:])
+    d_pred <- normalize(J_pred[:,p_c,:] - J_pred[:,p_p,:])
+    L_bone_dir += mean(1 - dot(d_target, d_pred))
+  L_bone_dir <- L_bone_dir / |B_dir|
+
+  # 3. Bone Length Loss
+  L_bone_len <- 0
+  for (p_p, p_c, t_p, t_c) in B_len:
+    l_pred <- ||J_pred[:,p_c,:] - J_pred[:,p_p,:]||
+    l_target <- ||J_target[:,t_c,:] - J_target[:,t_p,:]||
+    L_bone_len += mean((l_pred - l_target)^2)
+  L_bone_len <- L_bone_len / |B_len|
+
+  # 4. Shoulder Loss (virtual acromial from vertices)
+  acr_virtual_R <- mean(V[:, V_R, :], dim=1)  # V_R = [4125, 4124, 5293, 5290]
+  acr_virtual_L <- mean(V[:, V_L, :], dim=1)  # V_L = [635, 636, 1830, 1829]
+  L_shoulder <- mean(||acr_virtual_R - acr_R||^2 + ||acr_virtual_L - acr_L||^2)
+
+  # 5. Width Loss
+  w_skel <- ||acr_virtual_R - acr_virtual_L||
+  w_addb <- ||acr_R - acr_L||
+  L_width <- mean((w_skel - w_addb)^2)
+
+  # 6. Regularization
+  L_reg <- 0.01 * mean(theta^2)
+         + 0.005 * mean(beta^2)
+         + 0.05 * mean(theta[:,17:26]^2)
+         + 0.1 * mean(theta[:,[27,37]]^2)
+
+  # ===== Total Loss =====
+  L_total <- L_joint
+           + 0.3 * L_bone_dir
+           + 1.0 * L_bone_len
+           + 1.0 * L_shoulder
+           + 0.5 * L_width
+           + L_reg
+
+  # Backward & Update
+  L_total.backward()
+  optimizer.step()
+
+Return beta, theta, t
+```
+
+
+================================================================================
+5. METRICS
+================================================================================
+
+MPJPE (Mean Per Joint Position Error):
+  MPJPE = (1/|M|) * sum_{(i,j) in M} ||J_pred[:,j,:] - J_target[:,i,:]|| * 1000  [mm]
+
+Shoulder Metrics:
+  - Virtual acromial error: ||acr_virtual - acr_target|| * 1000  [mm]
+  - Humerus error: ||J_pred[:, humerus_idx, :] - acr_target|| * 1000  [mm]
+  - Width error: |w_skel - w_addb| * 1000  [mm]
+
+
+================================================================================
+6. JOINT MAPPINGS
+================================================================================
+
+AddB (20 joints) -> SKEL (24 joints) Mapping:
+  ground_pelvis -> pelvis
+  hip_r         -> femur_r
+  hip_l         -> femur_l
+  walker_knee_r -> tibia_r
+  walker_knee_l -> tibia_l
+  ankle_r       -> talus_r
+  ankle_l       -> talus_l
+  back          -> thorax
+  acromial_r    -> humerus_r  (excluded from L_joint when shoulder correction enabled)
+  acromial_l    -> humerus_l  (excluded from L_joint when shoulder correction enabled)
+  elbow_r       -> ulna_r
+  elbow_l       -> ulna_l
+  radius_hand_r -> radius_r
+  radius_hand_l -> radius_l
+
+
+================================================================================
+7. SKEL DOF STRUCTURE (46 DOFs)
+================================================================================
+
+DOF indices by joint:
+  0-2:   pelvis (3)
+  3-5:   femur_r (3)
+  6:     tibia_r (1)
+  7-9:   femur_l (3)
+  10:    tibia_l (1)
+  11-13: lumbar_1 (3)
+  14-16: lumbar_2 (3)
+  17-19: lumbar_3 (3)      <- spine regularization
+  20-22: lumbar_4 (3)      <- spine regularization
+  23-25: lumbar_5 (3)      <- spine regularization
+  26:    thorax (1)
+  27:    scapula_r (1)     <- scapula elevation regularization
+  28-30: humerus_r (3)
+  31-32: ulna_r (2)
+  33:    radius_r (1)
+  34-36: talus_r (3)
+  37:    scapula_l (1)     <- scapula elevation regularization
+  38-40: humerus_l (3)
+  41-42: ulna_l (2)
+  43:    radius_l (1)
+  44-46: talus_l (3)
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
